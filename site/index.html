@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bytecode Comrades — viewer</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --fg: #e8e8e8;
+    --muted: #888;
+    --accent: #c3ff00;
+    --border: #222;
+    --card: #141414;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    margin: 0; padding: 24px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { color: var(--accent); font-weight: 600; font-size: 22px; margin: 0 0 4px; letter-spacing: 1px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: 380px 1fr; gap: 24px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+
+  fieldset {
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); padding: 16px; margin: 0 0 16px;
+  }
+  legend { color: var(--accent); font-size: 11px; padding: 0 8px; text-transform: uppercase; letter-spacing: 2px; }
+
+  label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; margin: 10px 0 4px; letter-spacing: 1px; }
+  input, select, button {
+    width: 100%; padding: 8px 10px; border-radius: 4px;
+    background: #000; color: var(--fg); border: 1px solid var(--border);
+    font: inherit; font-size: 13px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #000; border: none; cursor: pointer; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px; padding: 12px; margin-top: 12px;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); margin-top: 8px; }
+
+  .result { display: flex; flex-direction: column; gap: 16px; }
+  .canvas {
+    background: #000; border: 1px solid var(--border); border-radius: 6px;
+    aspect-ratio: 1; image-rendering: pixelated;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .canvas img, .canvas svg { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .canvas .placeholder { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; }
+
+  .meta { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .meta h2 { color: var(--accent); margin: 0 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; }
+  .meta .name { font-size: 18px; margin-bottom: 12px; }
+  .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .trait { background: #000; border: 1px solid var(--border); border-radius: 4px; padding: 8px; }
+  .trait .k { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+  .trait .v { color: var(--fg); font-size: 12px; }
+
+  .err { color: #ff5050; padding: 8px; border: 1px solid #5a1010; background: #1a0505; border-radius: 4px; font-size: 12px; }
+  .ok  { color: var(--accent); font-size: 11px; }
+
+  details { margin-top: 12px; }
+  summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+  pre { background: #000; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 200px; }
+</style>
+</head>
+<body>
+
+<h1>BYTECODE COMRADES</h1>
+<p class="sub">Read a Comrade from any deployed contract. Pure on-chain art rendered procedurally per swap.</p>
+
+<div class="grid">
+
+  <div>
+    <fieldset>
+      <legend>Lookup</legend>
+      <label>Chain</label>
+      <select id="chain">
+        <option value="eth-mainnet">Ethereum Mainnet</option>
+        <option value="base-mainnet">Base</option>
+        <option value="arb-mainnet">Arbitrum</option>
+        <option value="opt-mainnet">Optimism</option>
+        <option value="polygon-mainnet">Polygon</option>
+        <option value="eth-sepolia">Sepolia</option>
+        <option value="base-sepolia">Base Sepolia</option>
+      </select>
+      <label>Contract address</label>
+      <input id="addr" placeholder="0x..." spellcheck="false">
+      <label>Token id</label>
+      <input id="id" type="number" min="0" value="0">
+      <button id="go">Fetch Comrade</button>
+      <button id="rand" class="ghost">Random id (0–9999)</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Settings</legend>
+      <label>Alchemy API key</label>
+      <input id="key" placeholder="paste your alchemy key" spellcheck="false">
+      <button id="save" class="ghost">Save</button>
+      <p class="sub" style="margin-top:12px;">Stored in localStorage. Never sent anywhere except Alchemy's RPC. Get one free at alchemy.com.</p>
+    </fieldset>
+  </div>
+
+  <div class="result">
+    <div class="canvas" id="canvas">
+      <div class="placeholder">no comrade loaded</div>
+    </div>
+    <div class="meta" id="meta" style="display:none;">
+      <h2>Metadata</h2>
+      <div class="name" id="name"></div>
+      <div class="traits" id="traits"></div>
+      <details>
+        <summary>Raw tokenURI</summary>
+        <pre id="raw"></pre>
+      </details>
+    </div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const ALCHEMY_KEY = "alchemy_key";
+$("key").value = localStorage.getItem(ALCHEMY_KEY) || "";
+$("save").onclick = () => {
+  localStorage.setItem(ALCHEMY_KEY, $("key").value.trim());
+  setStatus("ok", "Saved.");
+};
+
+$("rand").onclick = () => { $("id").value = Math.floor(Math.random() * 10000); };
+
+$("go").onclick = fetchComrade;
+
+function setStatus(kind, msg) {
+  const el = $("status");
+  el.className = kind;
+  el.textContent = msg;
+  if (kind === "ok") setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 3000);
+}
+
+function rpcUrl(chain) {
+  const key = localStorage.getItem(ALCHEMY_KEY);
+  if (!key) throw new Error("No Alchemy key. Paste yours in Settings → Save.");
+  return `https://${chain}.g.alchemy.com/v2/${key}`;
+}
+
+// keccak256("tokenURI(uint256)") = c87b56dd...
+const TOKEN_URI_SELECTOR = "c87b56dd";
+
+function encodeUint256(n) {
+  return BigInt(n).toString(16).padStart(64, "0");
+}
+
+// Decode an ABI-encoded `string` result returned by eth_call.
+// Format: 0x + 32-byte offset (0x20) + 32-byte length + string data padded to 32-byte boundary.
+function decodeAbiString(hex) {
+  if (hex.startsWith("0x")) hex = hex.slice(2);
+  // Skip first 64 chars (offset), next 64 chars are length.
+  const lenHex = hex.slice(64, 128);
+  const len = parseInt(lenHex, 16);
+  const dataHex = hex.slice(128, 128 + len * 2);
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+async function fetchComrade() {
+  $("status").className = "";
+  $("status").textContent = "";
+  $("meta").style.display = "none";
+  $("canvas").innerHTML = '<div class="placeholder">loading...</div>';
+  $("go").disabled = true;
+
+  try {
+    const chain = $("chain").value;
+    const addr  = $("addr").value.trim();
+    const id    = $("id").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad contract address.");
+    if (!/^[0-9]+$/.test(id)) throw new Error("Bad token id.");
+
+    const calldata = "0x" + TOKEN_URI_SELECTOR + encodeUint256(id);
+    const body = {
+      jsonrpc: "2.0",
+      method: "eth_call",
+      params: [{ to: addr, data: calldata }, "latest"],
+      id: 1,
+    };
+
+    const r = await fetch(rpcUrl(chain), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || "RPC error");
+    if (!j.result || j.result === "0x") throw new Error("Empty response — wrong contract or token id?");
+
+    const tokenURI = decodeAbiString(j.result);
+    $("raw").textContent = tokenURI;
+
+    // Parse the data URI
+    let json;
+    if (tokenURI.startsWith("data:application/json;utf8,")) {
+      json = JSON.parse(tokenURI.slice("data:application/json;utf8,".length));
+    } else if (tokenURI.startsWith("data:application/json;base64,")) {
+      const b64 = tokenURI.slice("data:application/json;base64,".length);
+      json = JSON.parse(atob(b64));
+    } else {
+      throw new Error("Unknown tokenURI format");
+    }
+
+    // Render the image
+    const img = json.image || "";
+    $("canvas").innerHTML = "";
+    if (img.startsWith("data:image/svg+xml;utf8,")) {
+      const svgText = img.slice("data:image/svg+xml;utf8,".length);
+      $("canvas").innerHTML = svgText;
+    } else if (img.startsWith("data:image/svg+xml;base64,")) {
+      const svgText = atob(img.slice("data:image/svg+xml;base64,".length));
+      $("canvas").innerHTML = svgText;
+    } else if (img) {
+      const el = document.createElement("img");
+      el.src = img;
+      $("canvas").appendChild(el);
+    } else {
+      $("canvas").innerHTML = '<div class="placeholder">no image</div>';
+    }
+
+    // Render metadata
+    $("name").textContent = json.name || "(no name)";
+    const traits = $("traits");
+    traits.innerHTML = "";
+    for (const a of json.attributes || []) {
+      const el = document.createElement("div");
+      el.className = "trait";
+      el.innerHTML = `<div class="k">${escapeHtml(a.trait_type)}</div><div class="v">${escapeHtml(a.value)}</div>`;
+      traits.appendChild(el);
+    }
+    $("meta").style.display = "";
+    setStatus("ok", `Loaded #${id}.`);
+  } catch (e) {
+    $("canvas").innerHTML = '<div class="placeholder">error</div>';
+    setStatus("err", e.message || String(e));
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+</script>
+
+</body>
+</html>
