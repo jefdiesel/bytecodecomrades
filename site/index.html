@@ -17,20 +17,28 @@
   body {
     background: var(--bg); color: var(--fg);
     font: 14px ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-    margin: 0; padding: 24px; max-width: 1100px; margin: 0 auto;
+    margin: 0; padding: 24px;
   }
+  .wrap { max-width: 1200px; margin: 0 auto; }
   h1 { color: var(--accent); font-weight: 600; font-size: 22px; margin: 0 0 4px; letter-spacing: 1px; }
   .sub { color: var(--muted); margin: 0 0 24px; font-size: 12px; }
 
-  .grid { display: grid; grid-template-columns: 380px 1fr; gap: 24px; }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 16px; cursor: pointer; color: var(--muted); border: none; background: transparent;
+    border-bottom: 2px solid transparent; font: inherit; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .panel { display: none; }
+  .panel.active { display: grid; grid-template-columns: 380px 1fr; gap: 24px; }
+  @media (max-width: 800px) { .panel.active { grid-template-columns: 1fr; } }
 
   fieldset {
     border: 1px solid var(--border); border-radius: 6px;
     background: var(--card); padding: 16px; margin: 0 0 16px;
   }
   legend { color: var(--accent); font-size: 11px; padding: 0 8px; text-transform: uppercase; letter-spacing: 2px; }
-
   label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; margin: 10px 0 4px; letter-spacing: 1px; }
   input, select, button {
     width: 100%; padding: 8px 10px; border-radius: 4px;
@@ -38,20 +46,16 @@
     font: inherit; font-size: 13px;
   }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
-  button {
-    background: var(--accent); color: #000; border: none; cursor: pointer; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 2px; padding: 12px; margin-top: 12px;
-  }
+  button { background: var(--accent); color: #000; border: none; cursor: pointer; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px; padding: 12px; margin-top: 12px; }
   button:hover { filter: brightness(1.1); }
   button:disabled { background: #333; color: #666; cursor: not-allowed; }
   button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); margin-top: 8px; }
 
-  .result { display: flex; flex-direction: column; gap: 16px; }
   .canvas {
     background: #000; border: 1px solid var(--border); border-radius: 6px;
     aspect-ratio: 1; image-rendering: pixelated;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
   }
   .canvas img, .canvas svg { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   .canvas .placeholder { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; }
@@ -70,50 +74,59 @@
   details { margin-top: 12px; }
   summary { color: var(--muted); cursor: pointer; font-size: 12px; }
   pre { background: #000; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 200px; }
+
+  /* Grid view */
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  .cell {
+    background: #000; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; cursor: pointer;
+  }
+  .cell:hover { border-color: var(--accent); }
+  .cell .img-wrap { aspect-ratio: 1; image-rendering: pixelated; background:#000; }
+  .cell .img-wrap img, .cell .img-wrap svg { width:100%; height:100%; image-rendering:pixelated; image-rendering:crisp-edges; }
+  .cell .lbl { padding: 4px; text-align: center; font-size: 10px; color: var(--muted); }
+  .pager { display:flex; align-items:center; gap:8px; margin-top:16px; }
+  .pager button { width: auto; padding: 6px 12px; }
+  .pager .info { color: var(--muted); font-size: 12px; flex: 1; }
+  .progress { color: var(--muted); font-size: 11px; margin: 8px 0; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
 <h1>BYTECODE COMRADES</h1>
-<p class="sub">Read a Comrade from any deployed contract. Pure on-chain art rendered procedurally per swap.</p>
+<p class="sub">On-chain art. Procedurally generated. Born from Uniswap v4 swaps.</p>
 
-<div class="grid">
+<div class="tabs">
+  <button class="tab active" data-tab="single">Lookup</button>
+  <button class="tab" data-tab="wallet">By Wallet</button>
+  <button class="tab" data-tab="browse">Browse All</button>
+  <button class="tab" data-tab="settings">Settings</button>
+</div>
 
+<!-- ============ SINGLE LOOKUP ============ -->
+<div class="panel active" id="panel-single">
   <div>
     <fieldset>
-      <legend>Lookup</legend>
+      <legend>Single Comrade</legend>
       <label>Chain</label>
-      <select id="chain">
-        <option value="eth-mainnet">Ethereum Mainnet</option>
-        <option value="base-mainnet">Base</option>
-        <option value="arb-mainnet">Arbitrum</option>
-        <option value="opt-mainnet">Optimism</option>
-        <option value="polygon-mainnet">Polygon</option>
-        <option value="eth-sepolia">Sepolia</option>
-        <option value="base-sepolia">Base Sepolia</option>
-      </select>
+      <select class="chain"></select>
       <label>Contract address</label>
-      <input id="addr" placeholder="0x..." spellcheck="false">
+      <input class="addr" placeholder="0x..." spellcheck="false">
       <label>Token id</label>
-      <input id="id" type="number" min="0" value="0">
-      <button id="go">Fetch Comrade</button>
-      <button id="rand" class="ghost">Random id (0–9999)</button>
-    </fieldset>
-
-    <fieldset>
-      <legend>Settings</legend>
-      <label>Alchemy API key</label>
-      <input id="key" placeholder="paste your alchemy key" spellcheck="false">
-      <button id="save" class="ghost">Save</button>
-      <p class="sub" style="margin-top:12px;">Stored in localStorage. Never sent anywhere except Alchemy's RPC. Get one free at alchemy.com.</p>
+      <input id="single-id" type="number" min="0" value="0">
+      <button id="go-single">Fetch</button>
+      <button id="rand" class="ghost">Random id</button>
     </fieldset>
   </div>
-
-  <div class="result">
+  <div>
     <div class="canvas" id="canvas">
       <div class="placeholder">no comrade loaded</div>
     </div>
-    <div class="meta" id="meta" style="display:none;">
+    <div class="meta" id="meta" style="display:none; margin-top:16px;">
       <h2>Metadata</h2>
       <div class="name" id="name"></div>
       <div class="traits" id="traits"></div>
@@ -122,26 +135,143 @@
         <pre id="raw"></pre>
       </details>
     </div>
-    <div id="status"></div>
+    <div id="status-single" style="margin-top:8px;"></div>
   </div>
+</div>
+
+<!-- ============ BY WALLET ============ -->
+<div class="panel" id="panel-wallet">
+  <div>
+    <fieldset>
+      <legend>By Wallet</legend>
+      <label>Chain</label>
+      <select class="chain"></select>
+      <label>Contract address</label>
+      <input class="addr" placeholder="0x..." spellcheck="false">
+      <label>Wallet address</label>
+      <input id="wallet-addr" placeholder="0x..." spellcheck="false">
+      <button id="go-wallet">Load Wallet</button>
+    </fieldset>
+  </div>
+  <div>
+    <div id="wallet-progress" class="progress"></div>
+    <div class="grid" id="wallet-grid"></div>
+    <div id="status-wallet"></div>
+  </div>
+</div>
+
+<!-- ============ BROWSE ALL ============ -->
+<div class="panel" id="panel-browse">
+  <div>
+    <fieldset>
+      <legend>Browse Collection</legend>
+      <label>Chain</label>
+      <select class="chain"></select>
+      <label>Contract address</label>
+      <input class="addr" placeholder="0x..." spellcheck="false">
+      <label>Page size</label>
+      <select id="browse-page-size">
+        <option value="24">24 per page</option>
+        <option value="48" selected>48 per page</option>
+        <option value="96">96 per page</option>
+      </select>
+      <button id="go-browse">Load Collection</button>
+    </fieldset>
+  </div>
+  <div>
+    <div id="browse-progress" class="progress"></div>
+    <div class="grid" id="browse-grid"></div>
+    <div class="pager" id="browse-pager" style="display:none;">
+      <button class="ghost" id="page-prev">Prev</button>
+      <button class="ghost" id="page-next">Next</button>
+      <span class="info" id="page-info"></span>
+    </div>
+    <div id="status-browse"></div>
+  </div>
+</div>
+
+<!-- ============ SETTINGS ============ -->
+<div class="panel" id="panel-settings">
+  <div>
+    <fieldset>
+      <legend>Settings</legend>
+      <label>Alchemy API key</label>
+      <input id="key" placeholder="paste your alchemy key" spellcheck="false">
+      <button id="save" class="ghost">Save</button>
+      <p class="sub" style="margin-top:12px;">Stored in localStorage on this device. Sent only to Alchemy's RPC. Get one free at alchemy.com.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Concurrency</legend>
+      <label>Max parallel requests</label>
+      <input id="concurrency" type="number" min="1" max="50" value="12">
+      <p class="sub" style="margin-top:8px;">Lower if you're hitting Alchemy rate limits.</p>
+    </fieldset>
+  </div>
+  <div></div>
+</div>
+
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
+const $$ = (sel) => document.querySelectorAll(sel);
 
-const ALCHEMY_KEY = "alchemy_key";
-$("key").value = localStorage.getItem(ALCHEMY_KEY) || "";
-$("save").onclick = () => {
-  localStorage.setItem(ALCHEMY_KEY, $("key").value.trim());
-  setStatus("ok", "Saved.");
-};
+const ALCHEMY_KEY  = "alchemy_key";
+const CONTRACT_KEY = "contract_addr";
+const CHAIN_KEY    = "chain";
 
-$("rand").onclick = () => { $("id").value = Math.floor(Math.random() * 10000); };
+const CHAINS = [
+  ["eth-mainnet",   "Ethereum Mainnet"],
+  ["base-mainnet",  "Base"],
+  ["arb-mainnet",   "Arbitrum"],
+  ["opt-mainnet",   "Optimism"],
+  ["polygon-mainnet","Polygon"],
+  ["eth-sepolia",   "Sepolia"],
+  ["base-sepolia",  "Base Sepolia"],
+];
 
-$("go").onclick = fetchComrade;
+// Function selectors
+const SEL_TOKEN_URI    = "c87b56dd";  // tokenURI(uint256)
+const SEL_INVENTORY    = "7eaebb15";  // inventoryOf(address)
+const SEL_NEXT_ID      = "12ae2c5f";  // nextComradeId()
 
-function setStatus(kind, msg) {
-  const el = $("status");
+// Populate chain dropdowns + persist last-used contract
+function initInputs() {
+  for (const sel of $$("select.chain")) {
+    sel.innerHTML = CHAINS.map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
+    sel.value = localStorage.getItem(CHAIN_KEY) || "base-mainnet";
+    sel.addEventListener("change", () => {
+      localStorage.setItem(CHAIN_KEY, sel.value);
+      for (const s of $$("select.chain")) s.value = sel.value;
+    });
+  }
+  for (const inp of $$("input.addr")) {
+    inp.value = localStorage.getItem(CONTRACT_KEY) || "";
+    inp.addEventListener("change", () => {
+      localStorage.setItem(CONTRACT_KEY, inp.value.trim());
+      for (const i of $$("input.addr")) i.value = inp.value.trim();
+    });
+  }
+  $("key").value = localStorage.getItem(ALCHEMY_KEY) || "";
+  $("concurrency").value = localStorage.getItem("concurrency") || "12";
+  $("save").onclick = () => {
+    localStorage.setItem(ALCHEMY_KEY, $("key").value.trim());
+    localStorage.setItem("concurrency", $("concurrency").value);
+    setStatus("settings", "ok", "Saved.");
+  };
+}
+
+// Tabs
+$$(".tab").forEach((t) => t.onclick = () => {
+  $$(".tab").forEach(x => x.classList.remove("active"));
+  $$(".panel").forEach(x => x.classList.remove("active"));
+  t.classList.add("active");
+  $("panel-" + t.dataset.tab).classList.add("active");
+});
+
+function setStatus(panel, kind, msg) {
+  const el = $("status-" + panel);
+  if (!el) return;
   el.className = kind;
   el.textContent = msg;
   if (kind === "ok") setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 3000);
@@ -149,118 +279,243 @@ function setStatus(kind, msg) {
 
 function rpcUrl(chain) {
   const key = localStorage.getItem(ALCHEMY_KEY);
-  if (!key) throw new Error("No Alchemy key. Paste yours in Settings → Save.");
+  if (!key) throw new Error("No Alchemy key. Settings → paste → Save.");
   return `https://${chain}.g.alchemy.com/v2/${key}`;
 }
 
-// keccak256("tokenURI(uint256)") = c87b56dd...
-const TOKEN_URI_SELECTOR = "c87b56dd";
+function encU256(n) { return BigInt(n).toString(16).padStart(64, "0"); }
+function encAddr(a) { return a.toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
 
-function encodeUint256(n) {
-  return BigInt(n).toString(16).padStart(64, "0");
+async function ethCall(chain, to, data) {
+  const r = await fetch(rpcUrl(chain), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc:"2.0", method:"eth_call", params:[{to,data}, "latest"], id:1 }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "RPC error");
+  if (!j.result || j.result === "0x") throw new Error("Empty response");
+  return j.result;
 }
 
-// Decode an ABI-encoded `string` result returned by eth_call.
-// Format: 0x + 32-byte offset (0x20) + 32-byte length + string data padded to 32-byte boundary.
-function decodeAbiString(hex) {
+// ABI decoders
+function decodeString(hex) {
   if (hex.startsWith("0x")) hex = hex.slice(2);
-  // Skip first 64 chars (offset), next 64 chars are length.
-  const lenHex = hex.slice(64, 128);
-  const len = parseInt(lenHex, 16);
+  const len = parseInt(hex.slice(64, 128), 16);
   const dataHex = hex.slice(128, 128 + len * 2);
   const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
-  }
+  for (let i = 0; i < len; i++) bytes[i] = parseInt(dataHex.slice(i*2, i*2+2), 16);
   return new TextDecoder("utf-8").decode(bytes);
 }
+function decodeUint256(hex) {
+  if (hex.startsWith("0x")) hex = hex.slice(2);
+  return BigInt("0x" + hex);
+}
+function decodeUint256Array(hex) {
+  if (hex.startsWith("0x")) hex = hex.slice(2);
+  const len = parseInt(hex.slice(64, 128), 16);
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    out.push(BigInt("0x" + hex.slice(128 + i*64, 128 + (i+1)*64)));
+  }
+  return out;
+}
 
-async function fetchComrade() {
-  $("status").className = "";
-  $("status").textContent = "";
-  $("meta").style.display = "none";
-  $("canvas").innerHTML = '<div class="placeholder">loading...</div>';
-  $("go").disabled = true;
+// Parse tokenURI data URI → metadata object
+function parseTokenURI(uri) {
+  if (uri.startsWith("data:application/json;utf8,")) {
+    return JSON.parse(uri.slice("data:application/json;utf8,".length));
+  } else if (uri.startsWith("data:application/json;base64,")) {
+    return JSON.parse(atob(uri.slice("data:application/json;base64,".length)));
+  }
+  throw new Error("Unknown tokenURI format");
+}
 
-  try {
-    const chain = $("chain").value;
-    const addr  = $("addr").value.trim();
-    const id    = $("id").value.trim();
-    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad contract address.");
-    if (!/^[0-9]+$/.test(id)) throw new Error("Bad token id.");
-
-    const calldata = "0x" + TOKEN_URI_SELECTOR + encodeUint256(id);
-    const body = {
-      jsonrpc: "2.0",
-      method: "eth_call",
-      params: [{ to: addr, data: calldata }, "latest"],
-      id: 1,
-    };
-
-    const r = await fetch(rpcUrl(chain), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json();
-    if (j.error) throw new Error(j.error.message || "RPC error");
-    if (!j.result || j.result === "0x") throw new Error("Empty response — wrong contract or token id?");
-
-    const tokenURI = decodeAbiString(j.result);
-    $("raw").textContent = tokenURI;
-
-    // Parse the data URI
-    let json;
-    if (tokenURI.startsWith("data:application/json;utf8,")) {
-      json = JSON.parse(tokenURI.slice("data:application/json;utf8,".length));
-    } else if (tokenURI.startsWith("data:application/json;base64,")) {
-      const b64 = tokenURI.slice("data:application/json;base64,".length);
-      json = JSON.parse(atob(b64));
-    } else {
-      throw new Error("Unknown tokenURI format");
-    }
-
-    // Render the image
-    const img = json.image || "";
-    $("canvas").innerHTML = "";
-    if (img.startsWith("data:image/svg+xml;utf8,")) {
-      const svgText = img.slice("data:image/svg+xml;utf8,".length);
-      $("canvas").innerHTML = svgText;
-    } else if (img.startsWith("data:image/svg+xml;base64,")) {
-      const svgText = atob(img.slice("data:image/svg+xml;base64,".length));
-      $("canvas").innerHTML = svgText;
-    } else if (img) {
-      const el = document.createElement("img");
-      el.src = img;
-      $("canvas").appendChild(el);
-    } else {
-      $("canvas").innerHTML = '<div class="placeholder">no image</div>';
-    }
-
-    // Render metadata
-    $("name").textContent = json.name || "(no name)";
-    const traits = $("traits");
-    traits.innerHTML = "";
-    for (const a of json.attributes || []) {
-      const el = document.createElement("div");
-      el.className = "trait";
-      el.innerHTML = `<div class="k">${escapeHtml(a.trait_type)}</div><div class="v">${escapeHtml(a.value)}</div>`;
-      traits.appendChild(el);
-    }
-    $("meta").style.display = "";
-    setStatus("ok", `Loaded #${id}.`);
-  } catch (e) {
-    $("canvas").innerHTML = '<div class="placeholder">error</div>';
-    setStatus("err", e.message || String(e));
-  } finally {
-    $("go").disabled = false;
+// Render an image string (data: URL) into a parent element
+function renderImage(parent, img) {
+  parent.innerHTML = "";
+  if (!img) { parent.innerHTML = '<div class="placeholder">no image</div>'; return; }
+  if (img.startsWith("data:image/svg+xml;utf8,")) {
+    parent.innerHTML = img.slice("data:image/svg+xml;utf8,".length);
+  } else if (img.startsWith("data:image/svg+xml;base64,")) {
+    parent.innerHTML = atob(img.slice("data:image/svg+xml;base64,".length));
+  } else {
+    const el = document.createElement("img");
+    el.src = img;
+    parent.appendChild(el);
   }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+// Limited-concurrency map
+async function pmap(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      try { out[idx] = await fn(items[idx], idx); }
+      catch (e) { out[idx] = { __error: e.message || String(e) }; }
+    }
+  }
+  await Promise.all(Array.from({length: n}, worker));
+  return out;
 }
-</script>
 
+// =============== SINGLE ===============
+$("rand").onclick = () => { $("single-id").value = Math.floor(Math.random() * 10000); };
+$("go-single").onclick = async () => {
+  $("status-single").textContent = "";
+  $("meta").style.display = "none";
+  $("canvas").innerHTML = '<div class="placeholder">loading...</div>';
+  $("go-single").disabled = true;
+  try {
+    const chain = $$("select.chain")[0].value;
+    const addr  = $$("input.addr")[0].value.trim();
+    const id    = $("single-id").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad contract address.");
+    const result = await ethCall(chain, addr, "0x" + SEL_TOKEN_URI + encU256(id));
+    const uri = decodeString(result);
+    $("raw").textContent = uri;
+    const meta = parseTokenURI(uri);
+    renderImage($("canvas"), meta.image);
+    $("name").textContent = meta.name || "(no name)";
+    const t = $("traits"); t.innerHTML = "";
+    for (const a of meta.attributes || []) {
+      const el = document.createElement("div");
+      el.className = "trait";
+      el.innerHTML = `<div class="k">${esc(a.trait_type)}</div><div class="v">${esc(a.value)}</div>`;
+      t.appendChild(el);
+    }
+    $("meta").style.display = "";
+    setStatus("single", "ok", `Loaded #${id}.`);
+  } catch (e) {
+    $("canvas").innerHTML = '<div class="placeholder">error</div>';
+    setStatus("single", "err", e.message || String(e));
+  } finally { $("go-single").disabled = false; }
+};
+
+// =============== BY WALLET ===============
+$("go-wallet").onclick = async () => {
+  $("status-wallet").textContent = "";
+  $("wallet-grid").innerHTML = "";
+  $("wallet-progress").textContent = "";
+  $("go-wallet").disabled = true;
+  try {
+    const chain = $$("select.chain")[1].value;
+    const addr  = $$("input.addr")[1].value.trim();
+    const w     = $("wallet-addr").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad contract address.");
+    if (!/^0x[0-9a-fA-F]{40}$/.test(w))    throw new Error("Bad wallet address.");
+
+    $("wallet-progress").textContent = "Reading inventory...";
+    const result = await ethCall(chain, addr, "0x" + SEL_INVENTORY + encAddr(w));
+    const ids = decodeUint256Array(result);
+    if (ids.length === 0) {
+      $("wallet-progress").textContent = "Wallet holds 0 Comrades.";
+      return;
+    }
+    $("wallet-progress").textContent = `Loading ${ids.length} Comrades...`;
+
+    const conc = parseInt(localStorage.getItem("concurrency") || "12");
+    let done = 0;
+    const metas = await pmap(ids, conc, async (id) => {
+      const r = await ethCall(chain, addr, "0x" + SEL_TOKEN_URI + encU256(id));
+      done++; $("wallet-progress").textContent = `Loaded ${done}/${ids.length}...`;
+      return parseTokenURI(decodeString(r));
+    });
+    renderGrid("wallet-grid", ids, metas, chain, addr);
+    $("wallet-progress").textContent = `${ids.length} Comrades held by ${shorten(w)}.`;
+  } catch (e) {
+    setStatus("wallet", "err", e.message || String(e));
+  } finally { $("go-wallet").disabled = false; }
+};
+
+// =============== BROWSE ALL ===============
+let browseState = { ids: [], page: 0, size: 48, chain: "", contract: "" };
+
+$("go-browse").onclick = async () => {
+  $("status-browse").textContent = "";
+  $("browse-grid").innerHTML = "";
+  $("browse-progress").textContent = "";
+  $("browse-pager").style.display = "none";
+  $("go-browse").disabled = true;
+  try {
+    const chain = $$("select.chain")[2].value;
+    const addr  = $$("input.addr")[2].value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad contract address.");
+    $("browse-progress").textContent = "Reading collection size...";
+    const r = await ethCall(chain, addr, "0x" + SEL_NEXT_ID);
+    const total = Number(decodeUint256(r));
+    if (total === 0) { $("browse-progress").textContent = "Collection is empty."; return; }
+    browseState = {
+      ids: Array.from({length: total}, (_, i) => BigInt(i)),
+      page: 0,
+      size: parseInt($("browse-page-size").value),
+      chain, contract: addr,
+    };
+    await loadBrowsePage();
+  } catch (e) {
+    setStatus("browse", "err", e.message || String(e));
+  } finally { $("go-browse").disabled = false; }
+};
+
+$("page-prev").onclick = () => { if (browseState.page > 0) { browseState.page--; loadBrowsePage(); }};
+$("page-next").onclick = () => {
+  const max = Math.ceil(browseState.ids.length / browseState.size) - 1;
+  if (browseState.page < max) { browseState.page++; loadBrowsePage(); }
+};
+
+async function loadBrowsePage() {
+  const { ids, page, size, chain, contract } = browseState;
+  const start = page * size;
+  const slice = ids.slice(start, start + size);
+  $("browse-grid").innerHTML = "";
+  $("browse-progress").textContent = `Loading ${slice.length} of ${ids.length}...`;
+  const conc = parseInt(localStorage.getItem("concurrency") || "12");
+  let done = 0;
+  const metas = await pmap(slice, conc, async (id) => {
+    const r = await ethCall(chain, contract, "0x" + SEL_TOKEN_URI + encU256(id));
+    done++; $("browse-progress").textContent = `Loaded ${done}/${slice.length}...`;
+    return parseTokenURI(decodeString(r));
+  });
+  renderGrid("browse-grid", slice, metas, chain, contract);
+  $("browse-progress").textContent = `${ids.length} total Comrades.`;
+  $("browse-pager").style.display = "";
+  const totalPages = Math.ceil(ids.length / size);
+  $("page-info").textContent = `Page ${page+1} / ${totalPages}`;
+  $("page-prev").disabled = page === 0;
+  $("page-next").disabled = page >= totalPages - 1;
+}
+
+function renderGrid(elId, ids, metas, chain, contract) {
+  const grid = $(elId);
+  grid.innerHTML = "";
+  ids.forEach((id, i) => {
+    const meta = metas[i];
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    const wrap = document.createElement("div");
+    wrap.className = "img-wrap";
+    if (meta && !meta.__error && meta.image) renderImage(wrap, meta.image);
+    else wrap.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;">err</div>';
+    const lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = "#" + id.toString();
+    cell.appendChild(wrap);
+    cell.appendChild(lbl);
+    cell.onclick = () => {
+      $$(".tab")[0].click();
+      $("single-id").value = id.toString();
+      $("go-single").click();
+    };
+    grid.appendChild(cell);
+  });
+}
+
+function shorten(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+initInputs();
+</script>
 </body>
 </html>
