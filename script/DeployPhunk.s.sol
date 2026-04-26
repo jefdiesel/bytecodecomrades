@@ -44,7 +44,8 @@ contract DeployPhunk is Script {
         console2.log("tokensPerPhunk: ", tokensPerPhunk);
 
         // 1. Mine hook salt off-broadcast (pure computation, no tx)
-        uint160 wantFlags = uint160(Hooks.AFTER_SWAP_FLAG);
+        // Hook needs afterSwap (1<<6) AND afterSwapReturnsDelta (1<<2) for the protocol fee.
+        uint160 wantFlags = uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
         bytes memory hookCreationCode = type(PhunkHook).creationCode;
         bytes memory hookCtorArgs = abi.encode(IPoolManager(poolMgr));
         (address predicted, bytes32 salt, uint256 iters) =

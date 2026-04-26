@@ -15,3 +15,23 @@ data/extract.log
 
 # Etherscan API response (contains the source we already extracted)
 data/source.json
+
+# Cloned upstream repos (not our code)
+data/comrades_repo/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.env
+*.key
+*.pem
+secrets/
+.secrets/
+
+# Local-only viewer config
+samples/viewer.local.*
+
+# Python caches
+__pycache__/
+*.pyc

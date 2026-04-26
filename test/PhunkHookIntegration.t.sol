@@ -34,14 +34,17 @@ contract PhunkHookIntegrationTest is Deployers {
         // 1. PoolManager + test routers
         deployFreshManagerAndRouters();
 
-        // 2. Mine a salt so the hook deploys to an address with afterSwap bit set
-        uint160 wantFlags = uint160(Hooks.AFTER_SWAP_FLAG);
+        // 2. Mine salt with both afterSwap + afterSwapReturnsDelta bits
+        uint160 wantFlags = uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
         bytes memory ctorArgs = abi.encode(manager);
         (address hookAddr, bytes32 salt) =
             _mineSalt(address(this), wantFlags, type(PhunkHook).creationCode, ctorArgs);
 
         hook = new PhunkHook{salt: salt}(manager);
         require(address(hook) == hookAddr, "hook addr mismatch");
+        // PoolSwapTest doesn't handle hook fee settlement; disable for these tests.
+        // Fee accounting has its own dedicated test.
+        hook.setFeeBps(0);
 
         // 3. Sprite data + renderer
         spriteData = new PhunkSpriteData();

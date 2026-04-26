@@ -1,0 +1,1958 @@
+{
+  "10_Backgrounds": [
+    {
+      "name": "AUX Flow",
+      "offset": 0,
+      "length": 1254,
+      "runs": 418
+    },
+    {
+      "name": "Block City Beach Resort (1337-Skulls)",
+      "offset": 1254,
+      "length": 510,
+      "runs": 170
+    },
+    {
+      "name": "Block City during Rollback (Chainrunners)",
+      "offset": 1764,
+      "length": 354,
+      "runs": 118
+    },
+    {
+      "name": "C3FF00",
+      "offset": 2118,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Classic Punks BG",
+      "offset": 2133,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Deep Purple",
+      "offset": 2148,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Feeling Blue",
+      "offset": 2163,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Green",
+      "offset": 2178,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "In Dorkness We Trust",
+      "offset": 2193,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Macs Noise",
+      "offset": 2208,
+      "length": 720,
+      "runs": 240
+    },
+    {
+      "name": "Matrix",
+      "offset": 2928,
+      "length": 534,
+      "runs": 178
+    },
+    {
+      "name": "Perky Porky Pink",
+      "offset": 3462,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Royal Purple",
+      "offset": 3477,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Sir Pinkalot",
+      "offset": 3492,
+      "length": 15,
+      "runs": 5
+    },
+    {
+      "name": "Sunrise in Block City",
+      "offset": 3507,
+      "length": 1287,
+      "runs": 429
+    },
+    {
+      "name": "Sunset over Block Assembly Complex C137",
+      "offset": 4794,
+      "length": 1215,
+      "runs": 405
+    },
+    {
+      "name": "Super Rare Holographic Ittybits Background",
+      "offset": 6009,
+      "length": 1491,
+      "runs": 497
+    },
+    {
+      "name": "The Chain is Fine",
+      "offset": 7500,
+      "length": 1248,
+      "runs": 416
+    },
+    {
+      "name": "The Drain Plains",
+      "offset": 8748,
+      "length": 963,
+      "runs": 321
+    },
+    {
+      "name": "The Great Block in the Sky",
+      "offset": 9711,
+      "length": 147,
+      "runs": 49
+    },
+    {
+      "name": "Touching Grass (OnChainKevin)",
+      "offset": 9858,
+      "length": 795,
+      "runs": 265
+    },
+    {
+      "name": "USA",
+      "offset": 10653,
+      "length": 393,
+      "runs": 131
+    }
+  ],
+  "08_Type": [
+    {
+      "name": "Alien People",
+      "offset": 11046,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Black and White Zombie",
+      "offset": 11304,
+      "length": 492,
+      "runs": 164
+    },
+    {
+      "name": "Blue People",
+      "offset": 11796,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Bone People",
+      "offset": 12054,
+      "length": 381,
+      "runs": 127
+    },
+    {
+      "name": "Ethernals",
+      "offset": 12435,
+      "length": 753,
+      "runs": 251
+    },
+    {
+      "name": "Ghost Chain People",
+      "offset": 13188,
+      "length": 1014,
+      "runs": 338
+    },
+    {
+      "name": "Golden",
+      "offset": 14202,
+      "length": 594,
+      "runs": 198
+    },
+    {
+      "name": "Human, Melanin Level 30",
+      "offset": 14796,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Human, Melanin Level 80",
+      "offset": 15054,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Human, Melanin Level Goth",
+      "offset": 15312,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Kombucha Mushroom People Exiled",
+      "offset": 15570,
+      "length": 384,
+      "runs": 128
+    },
+    {
+      "name": "Kombucha Mushroom People",
+      "offset": 15954,
+      "length": 393,
+      "runs": 131
+    },
+    {
+      "name": "Omega Block Zealots",
+      "offset": 16347,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Pepe People",
+      "offset": 16605,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Pork People",
+      "offset": 16863,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Purple People",
+      "offset": 17121,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "Purr People",
+      "offset": 17379,
+      "length": 345,
+      "runs": 115
+    },
+    {
+      "name": "Scriboor",
+      "offset": 17724,
+      "length": 258,
+      "runs": 86
+    },
+    {
+      "name": "We The People",
+      "offset": 17982,
+      "length": 378,
+      "runs": 126
+    },
+    {
+      "name": "Yeti People",
+      "offset": 18360,
+      "length": 411,
+      "runs": 137
+    },
+    {
+      "name": "Zombie",
+      "offset": 18771,
+      "length": 486,
+      "runs": 162
+    }
+  ],
+  "07_Skin Stuff": [
+    {
+      "name": "Adeptus Cuborum Block Tattoo",
+      "offset": 19257,
+      "length": 24,
+      "runs": 8
+    },
+    {
+      "name": "ETH Tattoo",
+      "offset": 19281,
+      "length": 27,
+      "runs": 9
+    },
+    {
+      "name": "Neck Tribal",
+      "offset": 19308,
+      "length": 54,
+      "runs": 18
+    },
+    {
+      "name": "Ouch!",
+      "offset": 19362,
+      "length": 27,
+      "runs": 9
+    },
+    {
+      "name": "Three Day Stubble with Block Tattoo",
+      "offset": 19389,
+      "length": 87,
+      "runs": 29
+    },
+    {
+      "name": "Three Day Stubble with ETH Tattoo",
+      "offset": 19476,
+      "length": 90,
+      "runs": 30
+    },
+    {
+      "name": "Three Day Stubble with Tribal Tattoo",
+      "offset": 19566,
+      "length": 114,
+      "runs": 38
+    },
+    {
+      "name": "Three Day Stubble",
+      "offset": 19680,
+      "length": 81,
+      "runs": 27
+    }
+  ],
+  "06_Cloths": [
+    {
+      "name": "Adeptus Cuborum Gas Wars Veteran Armor",
+      "offset": 19761,
+      "length": 273,
+      "runs": 91
+    },
+    {
+      "name": "Adeptus Cuborum Grunt Armor",
+      "offset": 20034,
+      "length": 402,
+      "runs": 134
+    },
+    {
+      "name": "BCPD Police Uniform",
+      "offset": 20436,
+      "length": 156,
+      "runs": 52
+    },
+    {
+      "name": "Black Hoodie",
+      "offset": 20592,
+      "length": 90,
+      "runs": 30
+    },
+    {
+      "name": "Black Shirt Checkered",
+      "offset": 20682,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Black Shirt",
+      "offset": 20790,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Block Construction Crew Exosceleton",
+      "offset": 20829,
+      "length": 399,
+      "runs": 133
+    },
+    {
+      "name": "Blue Shirt",
+      "offset": 21228,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Captains Uniform",
+      "offset": 21267,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Classic Black Suit",
+      "offset": 21369,
+      "length": 51,
+      "runs": 17
+    },
+    {
+      "name": "Dexclesia High Priest Armor",
+      "offset": 21420,
+      "length": 438,
+      "runs": 146
+    },
+    {
+      "name": "Fashion Hoodie",
+      "offset": 21858,
+      "length": 165,
+      "runs": 55
+    },
+    {
+      "name": "Flannel",
+      "offset": 22023,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "General of the Adeptus Cuborum",
+      "offset": 22125,
+      "length": 195,
+      "runs": 65
+    },
+    {
+      "name": "Gold Chain",
+      "offset": 22320,
+      "length": 33,
+      "runs": 11
+    },
+    {
+      "name": "Golden Hoodie",
+      "offset": 22353,
+      "length": 171,
+      "runs": 57
+    },
+    {
+      "name": "Green Shirt Striped",
+      "offset": 22524,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Green Shirt",
+      "offset": 22632,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Hardbass Uniform",
+      "offset": 22671,
+      "length": 63,
+      "runs": 21
+    },
+    {
+      "name": "Jamaica Shirt",
+      "offset": 22734,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Knights of the First Principles",
+      "offset": 22842,
+      "length": 252,
+      "runs": 84
+    },
+    {
+      "name": "McD Uniform",
+      "offset": 23094,
+      "length": 78,
+      "runs": 26
+    },
+    {
+      "name": "Mecha Crew Suit",
+      "offset": 23172,
+      "length": 114,
+      "runs": 38
+    },
+    {
+      "name": "Pink Hoodie",
+      "offset": 23286,
+      "length": 90,
+      "runs": 30
+    },
+    {
+      "name": "Pink Shirt Striped",
+      "offset": 23376,
+      "length": 57,
+      "runs": 19
+    },
+    {
+      "name": "Pink Shirt",
+      "offset": 23433,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Presidential Suit",
+      "offset": 23472,
+      "length": 57,
+      "runs": 19
+    },
+    {
+      "name": "Red Hoodie",
+      "offset": 23529,
+      "length": 90,
+      "runs": 30
+    },
+    {
+      "name": "Shady Lawyer Suit",
+      "offset": 23619,
+      "length": 51,
+      "runs": 17
+    },
+    {
+      "name": "Vampire Attack Attire",
+      "offset": 23670,
+      "length": 492,
+      "runs": 164
+    },
+    {
+      "name": "Wet Suit of the Grr People",
+      "offset": 24162,
+      "length": 69,
+      "runs": 23
+    },
+    {
+      "name": "White Shirt Stained",
+      "offset": 24231,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "White Shirt",
+      "offset": 24303,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Wifebeater",
+      "offset": 24342,
+      "length": 66,
+      "runs": 22
+    }
+  ],
+  "04_Audio Indexer Derivations": [
+    {
+      "name": "Black Alpha Receiver",
+      "offset": 24408,
+      "length": 210,
+      "runs": 70
+    },
+    {
+      "name": "Black Ears",
+      "offset": 24618,
+      "length": 90,
+      "runs": 30
+    },
+    {
+      "name": "Blue",
+      "offset": 24708,
+      "length": 75,
+      "runs": 25
+    },
+    {
+      "name": "Excellent Hearing",
+      "offset": 24783,
+      "length": 159,
+      "runs": 53
+    },
+    {
+      "name": "Fleshy",
+      "offset": 24942,
+      "length": 114,
+      "runs": 38
+    },
+    {
+      "name": "Golden Alpha Receiver",
+      "offset": 25056,
+      "length": 249,
+      "runs": 83
+    },
+    {
+      "name": "Goth",
+      "offset": 25305,
+      "length": 135,
+      "runs": 45
+    },
+    {
+      "name": "Machine Elf Broadband Receiver",
+      "offset": 25440,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Mecha Crew Coms",
+      "offset": 25542,
+      "length": 87,
+      "runs": 29
+    },
+    {
+      "name": "Pretty Problematic Growth",
+      "offset": 25629,
+      "length": 183,
+      "runs": 61
+    },
+    {
+      "name": "Purr Cheeks",
+      "offset": 25812,
+      "length": 84,
+      "runs": 28
+    },
+    {
+      "name": "Rad and Stripey",
+      "offset": 25896,
+      "length": 63,
+      "runs": 21
+    },
+    {
+      "name": "Simple Ears For Simple People",
+      "offset": 25959,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Unpleasent Residue",
+      "offset": 26061,
+      "length": 39,
+      "runs": 13
+    },
+    {
+      "name": "Useless Gills",
+      "offset": 26100,
+      "length": 180,
+      "runs": 60
+    },
+    {
+      "name": "You Should See His...",
+      "offset": 26280,
+      "length": 108,
+      "runs": 36
+    }
+  ],
+  "03_Mouth": [
+    {
+      "name": "420",
+      "offset": 26388,
+      "length": 177,
+      "runs": 59
+    },
+    {
+      "name": "Ackchyually",
+      "offset": 26565,
+      "length": 63,
+      "runs": 21
+    },
+    {
+      "name": "Babby Hungry",
+      "offset": 26628,
+      "length": 291,
+      "runs": 97
+    },
+    {
+      "name": "Bad Mood",
+      "offset": 26919,
+      "length": 177,
+      "runs": 59
+    },
+    {
+      "name": "Beak of the Pruu Pruu People",
+      "offset": 27096,
+      "length": 36,
+      "runs": 12
+    },
+    {
+      "name": "Beard of the Gods",
+      "offset": 27132,
+      "length": 192,
+      "runs": 64
+    },
+    {
+      "name": "Block Space Block Space Block",
+      "offset": 27324,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Block Speak (Drain Plains Pirates)",
+      "offset": 27432,
+      "length": 177,
+      "runs": 59
+    },
+    {
+      "name": "Block Speak",
+      "offset": 27609,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Bone People Mouth",
+      "offset": 27738,
+      "length": 138,
+      "runs": 46
+    },
+    {
+      "name": "Brand New Gasmask",
+      "offset": 27876,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Bubblegum",
+      "offset": 28005,
+      "length": 147,
+      "runs": 49
+    },
+    {
+      "name": "Carbon Fibre Sideburns",
+      "offset": 28152,
+      "length": 441,
+      "runs": 147
+    },
+    {
+      "name": "Chewy 7700 Industrial",
+      "offset": 28593,
+      "length": 378,
+      "runs": 126
+    },
+    {
+      "name": "Chewy 8800+",
+      "offset": 28971,
+      "length": 294,
+      "runs": 98
+    },
+    {
+      "name": "Chewy 9000 Connoisseur Edition",
+      "offset": 29265,
+      "length": 294,
+      "runs": 98
+    },
+    {
+      "name": "Double Block Speak",
+      "offset": 29559,
+      "length": 237,
+      "runs": 79
+    },
+    {
+      "name": "El Salvador",
+      "offset": 29796,
+      "length": 42,
+      "runs": 14
+    },
+    {
+      "name": "Evil Bot Voice Modulator",
+      "offset": 29838,
+      "length": 249,
+      "runs": 83
+    },
+    {
+      "name": "Floorbagorb Annihilator Jaw (activated)",
+      "offset": 30087,
+      "length": 291,
+      "runs": 97
+    },
+    {
+      "name": "Floorbagorb Annihilator Jaw",
+      "offset": 30378,
+      "length": 267,
+      "runs": 89
+    },
+    {
+      "name": "Floored",
+      "offset": 30645,
+      "length": 333,
+      "runs": 111
+    },
+    {
+      "name": "For Real, I Promise",
+      "offset": 30978,
+      "length": 231,
+      "runs": 77
+    },
+    {
+      "name": "Genuine Jaw",
+      "offset": 31209,
+      "length": 141,
+      "runs": 47
+    },
+    {
+      "name": "Geriatric Rockabilly Sideburns",
+      "offset": 31350,
+      "length": 264,
+      "runs": 88
+    },
+    {
+      "name": "Gigantism",
+      "offset": 31614,
+      "length": 336,
+      "runs": 112
+    },
+    {
+      "name": "Golden Gas Mask",
+      "offset": 31950,
+      "length": 210,
+      "runs": 70
+    },
+    {
+      "name": "Highly Aesthetic Botox Lips",
+      "offset": 32160,
+      "length": 81,
+      "runs": 27
+    },
+    {
+      "name": "Horny",
+      "offset": 32241,
+      "length": 234,
+      "runs": 78
+    },
+    {
+      "name": "Impossimouth",
+      "offset": 32475,
+      "length": 234,
+      "runs": 78
+    },
+    {
+      "name": "Insecure Laughter",
+      "offset": 32709,
+      "length": 75,
+      "runs": 25
+    },
+    {
+      "name": "Irresistible Smile",
+      "offset": 32784,
+      "length": 135,
+      "runs": 45
+    },
+    {
+      "name": "Lick it",
+      "offset": 32919,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Lovebound",
+      "offset": 33048,
+      "length": 201,
+      "runs": 67
+    },
+    {
+      "name": "Lumberjack on Pipe Break",
+      "offset": 33249,
+      "length": 276,
+      "runs": 92
+    },
+    {
+      "name": "Mecha Crew Pressure Stabilizer",
+      "offset": 33525,
+      "length": 135,
+      "runs": 45
+    },
+    {
+      "name": "Mildly Surprising",
+      "offset": 33660,
+      "length": 63,
+      "runs": 21
+    },
+    {
+      "name": "M\u00e9nage  \u00e0 Neuf",
+      "offset": 33723,
+      "length": 420,
+      "runs": 140
+    },
+    {
+      "name": "OY!!!!",
+      "offset": 34143,
+      "length": 201,
+      "runs": 67
+    },
+    {
+      "name": "Pepe People Mouth",
+      "offset": 34344,
+      "length": 114,
+      "runs": 38
+    },
+    {
+      "name": "Perfectly Normal Mouth",
+      "offset": 34458,
+      "length": 42,
+      "runs": 14
+    },
+    {
+      "name": "Pipe",
+      "offset": 34500,
+      "length": 219,
+      "runs": 73
+    },
+    {
+      "name": "Please Replace Gasmask",
+      "offset": 34719,
+      "length": 267,
+      "runs": 89
+    },
+    {
+      "name": "Pork People Snout",
+      "offset": 34986,
+      "length": 249,
+      "runs": 83
+    },
+    {
+      "name": "Proud af",
+      "offset": 35235,
+      "length": 345,
+      "runs": 115
+    },
+    {
+      "name": "Purr People Snout",
+      "offset": 35580,
+      "length": 207,
+      "runs": 69
+    },
+    {
+      "name": "Pussy Magnet",
+      "offset": 35787,
+      "length": 57,
+      "runs": 19
+    },
+    {
+      "name": "Quadrupel Block Speak",
+      "offset": 35844,
+      "length": 231,
+      "runs": 77
+    },
+    {
+      "name": "Ripping a Dart",
+      "offset": 36075,
+      "length": 147,
+      "runs": 49
+    },
+    {
+      "name": "Satisfaction",
+      "offset": 36222,
+      "length": 48,
+      "runs": 16
+    },
+    {
+      "name": "Scarf of the Pruu Pruu People",
+      "offset": 36270,
+      "length": 378,
+      "runs": 126
+    },
+    {
+      "name": "Sensual Lips",
+      "offset": 36648,
+      "length": 69,
+      "runs": 23
+    },
+    {
+      "name": "Simple Frown",
+      "offset": 36717,
+      "length": 24,
+      "runs": 8
+    },
+    {
+      "name": "Simple Indifference",
+      "offset": 36741,
+      "length": 18,
+      "runs": 6
+    },
+    {
+      "name": "Simple Simpleton Slit",
+      "offset": 36759,
+      "length": 24,
+      "runs": 8
+    },
+    {
+      "name": "Simple Smile",
+      "offset": 36783,
+      "length": 24,
+      "runs": 8
+    },
+    {
+      "name": "Single Use Doomsday Mask",
+      "offset": 36807,
+      "length": 141,
+      "runs": 47
+    },
+    {
+      "name": "Sniffmaster 9000",
+      "offset": 36948,
+      "length": 354,
+      "runs": 118
+    },
+    {
+      "name": "Stoned Ape Theory",
+      "offset": 37302,
+      "length": 273,
+      "runs": 91
+    },
+    {
+      "name": "Stunned",
+      "offset": 37575,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Stunning Mouth Eye of the Hyppo Shamans",
+      "offset": 37683,
+      "length": 333,
+      "runs": 111
+    },
+    {
+      "name": "Swedish Lumberjack",
+      "offset": 38016,
+      "length": 144,
+      "runs": 48
+    },
+    {
+      "name": "The Freddy",
+      "offset": 38160,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Three Stripes",
+      "offset": 38232,
+      "length": 30,
+      "runs": 10
+    },
+    {
+      "name": "Traditional Kaiju-Cow Hunter Camouflage",
+      "offset": 38262,
+      "length": 204,
+      "runs": 68
+    },
+    {
+      "name": "ULULULULULUL",
+      "offset": 38466,
+      "length": 291,
+      "runs": 97
+    },
+    {
+      "name": "Vape",
+      "offset": 38757,
+      "length": 171,
+      "runs": 57
+    },
+    {
+      "name": "Vomit, Tier 1 Call The Doctor!",
+      "offset": 38928,
+      "length": 264,
+      "runs": 88
+    },
+    {
+      "name": "Vomit, Tier 2 Call the Gender Studies Teacher!!",
+      "offset": 39192,
+      "length": 288,
+      "runs": 96
+    },
+    {
+      "name": "Vomit, Tier 3 CALL THE UNICORNS!!!",
+      "offset": 39480,
+      "length": 402,
+      "runs": 134
+    },
+    {
+      "name": "Vomit, Tier 4 CaLL tHe GoDS!!!!",
+      "offset": 39882,
+      "length": 957,
+      "runs": 319
+    }
+  ],
+  "02_Eyes": [
+    {
+      "name": "3D Glasses",
+      "offset": 40839,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Alien Eyes",
+      "offset": 40968,
+      "length": 84,
+      "runs": 28
+    },
+    {
+      "name": "Auto GMer",
+      "offset": 41052,
+      "length": 339,
+      "runs": 113
+    },
+    {
+      "name": "Aviators",
+      "offset": 41391,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Big Eyes",
+      "offset": 41520,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Big Shades",
+      "offset": 41649,
+      "length": 87,
+      "runs": 29
+    },
+    {
+      "name": "Block Vision (Drain Plains Pirates)",
+      "offset": 41736,
+      "length": 159,
+      "runs": 53
+    },
+    {
+      "name": "Block Vision Cyan Night",
+      "offset": 41895,
+      "length": 123,
+      "runs": 41
+    },
+    {
+      "name": "Block Vision ETHS Heart",
+      "offset": 42018,
+      "length": 129,
+      "runs": 43
+    },
+    {
+      "name": "Block Vision",
+      "offset": 42147,
+      "length": 87,
+      "runs": 29
+    },
+    {
+      "name": "Block Visoor",
+      "offset": 42234,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Blockchain Preacher",
+      "offset": 42306,
+      "length": 153,
+      "runs": 51
+    },
+    {
+      "name": "Bone People Eyes",
+      "offset": 42459,
+      "length": 96,
+      "runs": 32
+    },
+    {
+      "name": "Bored",
+      "offset": 42555,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Brainiac",
+      "offset": 42621,
+      "length": 54,
+      "runs": 18
+    },
+    {
+      "name": "Classic Shades",
+      "offset": 42675,
+      "length": 117,
+      "runs": 39
+    },
+    {
+      "name": "Cyclops",
+      "offset": 42792,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Death Cross Mask",
+      "offset": 42894,
+      "length": 309,
+      "runs": 103
+    },
+    {
+      "name": "Double Block Vision",
+      "offset": 43203,
+      "length": 165,
+      "runs": 55
+    },
+    {
+      "name": "Dragon Mask of the Pamp People",
+      "offset": 43368,
+      "length": 612,
+      "runs": 204
+    },
+    {
+      "name": "Drain Lord Martha Focker Mask",
+      "offset": 43980,
+      "length": 462,
+      "runs": 154
+    },
+    {
+      "name": "Ego Death Ray",
+      "offset": 44442,
+      "length": 189,
+      "runs": 63
+    },
+    {
+      "name": "Empty Stare",
+      "offset": 44631,
+      "length": 156,
+      "runs": 52
+    },
+    {
+      "name": "Eths Maxi Eyes",
+      "offset": 44787,
+      "length": 495,
+      "runs": 165
+    },
+    {
+      "name": "Evil Bot Visual Sensors",
+      "offset": 45282,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Eye Patch",
+      "offset": 45384,
+      "length": 96,
+      "runs": 32
+    },
+    {
+      "name": "Floorbagorb Annihilator Goggles (activated)",
+      "offset": 45480,
+      "length": 201,
+      "runs": 67
+    },
+    {
+      "name": "Floorbagorb Annihilator Goggles",
+      "offset": 45681,
+      "length": 183,
+      "runs": 61
+    },
+    {
+      "name": "Four Stripes",
+      "offset": 45864,
+      "length": 36,
+      "runs": 12
+    },
+    {
+      "name": "Genesis Block Disciple",
+      "offset": 45900,
+      "length": 114,
+      "runs": 38
+    },
+    {
+      "name": "Green Phazer Bobazer",
+      "offset": 46014,
+      "length": 186,
+      "runs": 62
+    },
+    {
+      "name": "He was never the same again",
+      "offset": 46200,
+      "length": 204,
+      "runs": 68
+    },
+    {
+      "name": "Inner Sanctuary",
+      "offset": 46404,
+      "length": 264,
+      "runs": 88
+    },
+    {
+      "name": "Ittybits Glasses",
+      "offset": 46668,
+      "length": 123,
+      "runs": 41
+    },
+    {
+      "name": "Late Night Minting",
+      "offset": 46791,
+      "length": 105,
+      "runs": 35
+    },
+    {
+      "name": "MEV Bot Protector Blue",
+      "offset": 46896,
+      "length": 93,
+      "runs": 31
+    },
+    {
+      "name": "MEV Bot Protector Orange",
+      "offset": 46989,
+      "length": 93,
+      "runs": 31
+    },
+    {
+      "name": "Mecha Crew Goggles",
+      "offset": 47082,
+      "length": 84,
+      "runs": 28
+    },
+    {
+      "name": "Nam June PIV (PIVproved)",
+      "offset": 47166,
+      "length": 204,
+      "runs": 68
+    },
+    {
+      "name": "Nerd Glasses",
+      "offset": 47370,
+      "length": 123,
+      "runs": 41
+    },
+    {
+      "name": "Nouns Glasses",
+      "offset": 47493,
+      "length": 165,
+      "runs": 55
+    },
+    {
+      "name": "OCK Nouns Glasses",
+      "offset": 47658,
+      "length": 159,
+      "runs": 53
+    },
+    {
+      "name": "Official Rug Lord Fan Club Glasses",
+      "offset": 47817,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Orange Lazer Dazer",
+      "offset": 47889,
+      "length": 207,
+      "runs": 69
+    },
+    {
+      "name": "Paranoid",
+      "offset": 48096,
+      "length": 117,
+      "runs": 39
+    },
+    {
+      "name": "Perfectly Normal Eyes",
+      "offset": 48213,
+      "length": 78,
+      "runs": 26
+    },
+    {
+      "name": "Pit Vipers",
+      "offset": 48291,
+      "length": 219,
+      "runs": 73
+    },
+    {
+      "name": "Punk Eyes Lady",
+      "offset": 48510,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Punk Eyes",
+      "offset": 48582,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Purr People Eyes",
+      "offset": 48654,
+      "length": 96,
+      "runs": 32
+    },
+    {
+      "name": "Quadrupel Block Vision",
+      "offset": 48750,
+      "length": 159,
+      "runs": 53
+    },
+    {
+      "name": "Ready For Battle",
+      "offset": 48909,
+      "length": 54,
+      "runs": 18
+    },
+    {
+      "name": "SKULLS FOR THE SKULL GOD",
+      "offset": 48963,
+      "length": 210,
+      "runs": 70
+    },
+    {
+      "name": "Scriboor Visoor",
+      "offset": 49173,
+      "length": 75,
+      "runs": 25
+    },
+    {
+      "name": "Seductive",
+      "offset": 49248,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Seedphrase Mugger Mask",
+      "offset": 49356,
+      "length": 99,
+      "runs": 33
+    },
+    {
+      "name": "SkullX Raiders Visoor",
+      "offset": 49455,
+      "length": 270,
+      "runs": 90
+    },
+    {
+      "name": "Sus af",
+      "offset": 49725,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "TX Hash",
+      "offset": 49827,
+      "length": 252,
+      "runs": 84
+    },
+    {
+      "name": "Trippin hard",
+      "offset": 50079,
+      "length": 108,
+      "runs": 36
+    },
+    {
+      "name": "Visoor Blue",
+      "offset": 50187,
+      "length": 84,
+      "runs": 28
+    },
+    {
+      "name": "Visoor Pink",
+      "offset": 50271,
+      "length": 75,
+      "runs": 25
+    },
+    {
+      "name": "Watching Titanic",
+      "offset": 50346,
+      "length": 210,
+      "runs": 70
+    },
+    {
+      "name": "Who TF is making these Snorkels for Dogs",
+      "offset": 50556,
+      "length": 261,
+      "runs": 87
+    },
+    {
+      "name": "Wide Awake",
+      "offset": 50817,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Wink Wink",
+      "offset": 50889,
+      "length": 54,
+      "runs": 18
+    },
+    {
+      "name": "Zoned out",
+      "offset": 50943,
+      "length": 84,
+      "runs": 28
+    }
+  ],
+  "05_Head": [
+    {
+      "name": "Abracadabrugged",
+      "offset": 51027,
+      "length": 138,
+      "runs": 46
+    },
+    {
+      "name": "Adeptus Cuborum Helmet MKI",
+      "offset": 51165,
+      "length": 99,
+      "runs": 33
+    },
+    {
+      "name": "Adeptus Cuborum Helmet MKIII",
+      "offset": 51264,
+      "length": 399,
+      "runs": 133
+    },
+    {
+      "name": "Adeptus Cuborum Helmet MKIX",
+      "offset": 51663,
+      "length": 489,
+      "runs": 163
+    },
+    {
+      "name": "Amanita Muscaria Shower Cap",
+      "offset": 52152,
+      "length": 273,
+      "runs": 91
+    },
+    {
+      "name": "Angel Wings",
+      "offset": 52425,
+      "length": 171,
+      "runs": 57
+    },
+    {
+      "name": "Antenna",
+      "offset": 52596,
+      "length": 96,
+      "runs": 32
+    },
+    {
+      "name": "BCPD Police Cap",
+      "offset": 52692,
+      "length": 111,
+      "runs": 37
+    },
+    {
+      "name": "Bandana Pirate",
+      "offset": 52803,
+      "length": 84,
+      "runs": 28
+    },
+    {
+      "name": "Bandana Skull",
+      "offset": 52887,
+      "length": 126,
+      "runs": 42
+    },
+    {
+      "name": "Block Construction Foreman Helmet",
+      "offset": 53013,
+      "length": 348,
+      "runs": 116
+    },
+    {
+      "name": "Blockchain Maintanance Helmet",
+      "offset": 53361,
+      "length": 126,
+      "runs": 42
+    },
+    {
+      "name": "Blockthink Receiver",
+      "offset": 53487,
+      "length": 75,
+      "runs": 25
+    },
+    {
+      "name": "Bubble Tea Hair",
+      "offset": 53562,
+      "length": 600,
+      "runs": 200
+    },
+    {
+      "name": "Captains Hat",
+      "offset": 54162,
+      "length": 147,
+      "runs": 49
+    },
+    {
+      "name": "Champ",
+      "offset": 54309,
+      "length": 285,
+      "runs": 95
+    },
+    {
+      "name": "Chopper Hat",
+      "offset": 54594,
+      "length": 135,
+      "runs": 45
+    },
+    {
+      "name": "Circuit Hair",
+      "offset": 54729,
+      "length": 894,
+      "runs": 298
+    },
+    {
+      "name": "Edgelord",
+      "offset": 55623,
+      "length": 333,
+      "runs": 111
+    },
+    {
+      "name": "Emo",
+      "offset": 55956,
+      "length": 213,
+      "runs": 71
+    },
+    {
+      "name": "Fancy Hair black",
+      "offset": 56169,
+      "length": 276,
+      "runs": 92
+    },
+    {
+      "name": "Fancy Hair blonde",
+      "offset": 56445,
+      "length": 288,
+      "runs": 96
+    },
+    {
+      "name": "Gellar Field Projector",
+      "offset": 56733,
+      "length": 741,
+      "runs": 247
+    },
+    {
+      "name": "Gellar Shield",
+      "offset": 57474,
+      "length": 381,
+      "runs": 127
+    },
+    {
+      "name": "Geriatric Rockabilly",
+      "offset": 57855,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Geylo",
+      "offset": 57927,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Golden Crown",
+      "offset": 58029,
+      "length": 189,
+      "runs": 63
+    },
+    {
+      "name": "Hash Mesh",
+      "offset": 58218,
+      "length": 831,
+      "runs": 277
+    },
+    {
+      "name": "Headwind",
+      "offset": 59049,
+      "length": 177,
+      "runs": 59
+    },
+    {
+      "name": "Hind Hair",
+      "offset": 59226,
+      "length": 144,
+      "runs": 48
+    },
+    {
+      "name": "Horns of the Peeperz People",
+      "offset": 59370,
+      "length": 162,
+      "runs": 54
+    },
+    {
+      "name": "Ice Princess",
+      "offset": 59532,
+      "length": 558,
+      "runs": 186
+    },
+    {
+      "name": "Invisible Scriptoadz Companion",
+      "offset": 60090,
+      "length": 150,
+      "runs": 50
+    },
+    {
+      "name": "Iridescent Mantis Shrimpicorn Horn",
+      "offset": 60240,
+      "length": 240,
+      "runs": 80
+    },
+    {
+      "name": "Judge Judge",
+      "offset": 60480,
+      "length": 306,
+      "runs": 102
+    },
+    {
+      "name": "Kinights Helmet",
+      "offset": 60786,
+      "length": 369,
+      "runs": 123
+    },
+    {
+      "name": "Knitted Cap",
+      "offset": 61155,
+      "length": 96,
+      "runs": 32
+    },
+    {
+      "name": "Logic Tree",
+      "offset": 61251,
+      "length": 363,
+      "runs": 121
+    },
+    {
+      "name": "Maga Cap",
+      "offset": 61614,
+      "length": 93,
+      "runs": 31
+    },
+    {
+      "name": "McD Cap Black",
+      "offset": 61707,
+      "length": 117,
+      "runs": 39
+    },
+    {
+      "name": "McD Cap Red",
+      "offset": 61824,
+      "length": 117,
+      "runs": 39
+    },
+    {
+      "name": "Mecha Crew Call Data Transceiver",
+      "offset": 61941,
+      "length": 72,
+      "runs": 24
+    },
+    {
+      "name": "Mohawk Dark",
+      "offset": 62013,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Mohawk Green",
+      "offset": 62079,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Mohawk Pink",
+      "offset": 62145,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Mohawk White",
+      "offset": 62211,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Mohawk",
+      "offset": 62277,
+      "length": 66,
+      "runs": 22
+    },
+    {
+      "name": "Most Simple Hair Blonde",
+      "offset": 62343,
+      "length": 309,
+      "runs": 103
+    },
+    {
+      "name": "Most Simple Hair Red",
+      "offset": 62652,
+      "length": 309,
+      "runs": 103
+    },
+    {
+      "name": "Orange Side Hair",
+      "offset": 62961,
+      "length": 276,
+      "runs": 92
+    },
+    {
+      "name": "Pigtails Blonde",
+      "offset": 63237,
+      "length": 351,
+      "runs": 117
+    },
+    {
+      "name": "Pigtails brown",
+      "offset": 63588,
+      "length": 360,
+      "runs": 120
+    },
+    {
+      "name": "Ponytail Black",
+      "offset": 63948,
+      "length": 405,
+      "runs": 135
+    },
+    {
+      "name": "Ponytail Blonde",
+      "offset": 64353,
+      "length": 396,
+      "runs": 132
+    },
+    {
+      "name": "Ponytail Pink",
+      "offset": 64749,
+      "length": 429,
+      "runs": 143
+    },
+    {
+      "name": "Prince Karen",
+      "offset": 65178,
+      "length": 240,
+      "runs": 80
+    },
+    {
+      "name": "Pruustafari",
+      "offset": 65418,
+      "length": 429,
+      "runs": 143
+    },
+    {
+      "name": "Pure Elegance",
+      "offset": 65847,
+      "length": 219,
+      "runs": 73
+    },
+    {
+      "name": "Purple Cap",
+      "offset": 66066,
+      "length": 69,
+      "runs": 23
+    },
+    {
+      "name": "Purr People Mouse-Radar",
+      "offset": 66135,
+      "length": 288,
+      "runs": 96
+    },
+    {
+      "name": "Ram Alamadingdong",
+      "offset": 66423,
+      "length": 339,
+      "runs": 113
+    },
+    {
+      "name": "Saudi People",
+      "offset": 66762,
+      "length": 462,
+      "runs": 154
+    },
+    {
+      "name": "Shaved",
+      "offset": 67224,
+      "length": 57,
+      "runs": 19
+    },
+    {
+      "name": "Sinful Halo",
+      "offset": 67281,
+      "length": 102,
+      "runs": 34
+    },
+    {
+      "name": "Slick",
+      "offset": 67383,
+      "length": 165,
+      "runs": 55
+    },
+    {
+      "name": "Smooth",
+      "offset": 67548,
+      "length": 354,
+      "runs": 118
+    },
+    {
+      "name": "Straight af",
+      "offset": 67902,
+      "length": 141,
+      "runs": 47
+    },
+    {
+      "name": "Stuntman Helmet (PUNKAYC)",
+      "offset": 68043,
+      "length": 429,
+      "runs": 143
+    },
+    {
+      "name": "Super Sick Cap",
+      "offset": 68472,
+      "length": 87,
+      "runs": 29
+    },
+    {
+      "name": "Swimming Cap",
+      "offset": 68559,
+      "length": 243,
+      "runs": 81
+    },
+    {
+      "name": "Tippy Toppy Top Hat",
+      "offset": 68802,
+      "length": 78,
+      "runs": 26
+    },
+    {
+      "name": "Toxic Techno Granny",
+      "offset": 68880,
+      "length": 339,
+      "runs": 113
+    },
+    {
+      "name": "Trump Hair",
+      "offset": 69219,
+      "length": 219,
+      "runs": 73
+    },
+    {
+      "name": "Vitaliks Blessing",
+      "offset": 69438,
+      "length": 174,
+      "runs": 58
+    },
+    {
+      "name": "Wallet Drainer",
+      "offset": 69612,
+      "length": 141,
+      "runs": 47
+    },
+    {
+      "name": "Weird Sexy Alien Lady",
+      "offset": 69753,
+      "length": 477,
+      "runs": 159
+    },
+    {
+      "name": "Wild Purple Hair",
+      "offset": 70230,
+      "length": 123,
+      "runs": 41
+    }
+  ],
+  "01_Relics": [
+    {
+      "name": "Block Explorer of the Dexclesia",
+      "offset": 70353,
+      "length": 243,
+      "runs": 81
+    },
+    {
+      "name": "Candle of Despair",
+      "offset": 70596,
+      "length": 297,
+      "runs": 99
+    },
+    {
+      "name": "Candle of Frolic",
+      "offset": 70893,
+      "length": 288,
+      "runs": 96
+    },
+    {
+      "name": "Holy Forking Staff",
+      "offset": 71181,
+      "length": 303,
+      "runs": 101
+    },
+    {
+      "name": "Pure Eths Crystal",
+      "offset": 71484,
+      "length": 234,
+      "runs": 78
+    },
+    {
+      "name": "Scepter of Immutability",
+      "offset": 71718,
+      "length": 324,
+      "runs": 108
+    },
+    {
+      "name": "Sword of Consensus",
+      "offset": 72042,
+      "length": 453,
+      "runs": 151
+    }
+  ]
+}
