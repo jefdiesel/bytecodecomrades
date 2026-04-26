@@ -1,0 +1,17 @@
+# Foundry build artifacts
+cache/
+out/
+broadcast/
+foundry.lock
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+*.log
+data/extract.log
+
+# Etherscan API response (contains the source we already extracted)
+data/source.json
