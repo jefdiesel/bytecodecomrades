@@ -194,17 +194,15 @@
 <div class="panel" id="panel-settings">
   <div>
     <fieldset>
-      <legend>Settings</legend>
-      <label>Alchemy API key</label>
-      <input id="key" placeholder="paste your alchemy key" spellcheck="false">
-      <button id="save" class="ghost">Save</button>
-      <p class="sub" style="margin-top:12px;">Stored in localStorage on this device. Sent only to Alchemy's RPC. Get one free at alchemy.com.</p>
-    </fieldset>
-    <fieldset>
       <legend>Concurrency</legend>
       <label>Max parallel requests</label>
       <input id="concurrency" type="number" min="1" max="50" value="12">
-      <p class="sub" style="margin-top:8px;">Lower if you're hitting Alchemy rate limits.</p>
+      <p class="sub" style="margin-top:8px;">Lower if the page is slow.</p>
+      <button id="save" class="ghost">Save</button>
+    </fieldset>
+    <fieldset>
+      <legend>About</legend>
+      <p class="sub" style="margin:0;">RPC calls are proxied through this site's serverless function — no API key needed in the browser. Source: <a href="https://github.com/jefdiesel/bytecodecomrades" style="color:var(--accent);">github</a>.</p>
     </fieldset>
   </div>
   <div></div>
@@ -216,9 +214,12 @@
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-const ALCHEMY_KEY  = "alchemy_key";
 const CONTRACT_KEY = "contract_addr";
 const CHAIN_KEY    = "chain";
+
+// Default contract address — can be overridden by user. Sepolia BCC deploy.
+const DEFAULT_CONTRACT = "0xb215f556b0f2e3f62105a4309bb35b2258bed13a";
+const DEFAULT_CHAIN    = "eth-sepolia";
 
 const CHAINS = [
   ["eth-mainnet",   "Ethereum Mainnet"],
@@ -239,23 +240,21 @@ const SEL_NEXT_ID      = "12ae2c5f";  // nextComradeId()
 function initInputs() {
   for (const sel of $$("select.chain")) {
     sel.innerHTML = CHAINS.map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
-    sel.value = localStorage.getItem(CHAIN_KEY) || "base-mainnet";
+    sel.value = localStorage.getItem(CHAIN_KEY) || DEFAULT_CHAIN;
     sel.addEventListener("change", () => {
       localStorage.setItem(CHAIN_KEY, sel.value);
       for (const s of $$("select.chain")) s.value = sel.value;
     });
   }
   for (const inp of $$("input.addr")) {
-    inp.value = localStorage.getItem(CONTRACT_KEY) || "";
+    inp.value = localStorage.getItem(CONTRACT_KEY) || DEFAULT_CONTRACT;
     inp.addEventListener("change", () => {
       localStorage.setItem(CONTRACT_KEY, inp.value.trim());
       for (const i of $$("input.addr")) i.value = inp.value.trim();
     });
   }
-  $("key").value = localStorage.getItem(ALCHEMY_KEY) || "";
   $("concurrency").value = localStorage.getItem("concurrency") || "12";
   $("save").onclick = () => {
-    localStorage.setItem(ALCHEMY_KEY, $("key").value.trim());
     localStorage.setItem("concurrency", $("concurrency").value);
     setStatus("settings", "ok", "Saved.");
   };
@@ -278,9 +277,8 @@ function setStatus(panel, kind, msg) {
 }
 
 function rpcUrl(chain) {
-  const key = localStorage.getItem(ALCHEMY_KEY);
-  if (!key) throw new Error("No Alchemy key. Settings → paste → Save.");
-  return `https://${chain}.g.alchemy.com/v2/${key}`;
+  // Hit our serverless proxy at /api/rpc — Alchemy key lives server-side.
+  return `/api/rpc?chain=${encodeURIComponent(chain)}`;
 }
 
 function encU256(n) { return BigInt(n).toString(16).padStart(64, "0"); }
@@ -293,7 +291,7 @@ async function ethCall(chain, to, data) {
     body: JSON.stringify({ jsonrpc:"2.0", method:"eth_call", params:[{to,data}, "latest"], id:1 }),
   });
   const j = await r.json();
-  if (j.error) throw new Error(j.error.message || "RPC error");
+  if (j.error) throw new Error(j.error.message || j.error || "RPC error");
   if (!j.result || j.result === "0x") throw new Error("Empty response");
   return j.result;
 }
