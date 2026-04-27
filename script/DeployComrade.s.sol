@@ -105,7 +105,8 @@ contract DeployComrade is Script {
         token.setRenderer(IComradeRenderer(address(renderer)));
         token.setBloom(IComradeBloom(address(bloom)));
         token.setSkip(poolMgr, true);  // PoolManager holds liquidity, exempt from minting
-        token.setClaimFee(0.001111 ether);  // ~$3.33 at $3k ETH; tweak via setClaimFee anytime
+        token.setClaimFee(0.001111 ether);    // ~$3.50 — wrap into a tradeable ERC-721
+        token.setUnclaimFee(0.0069 ether);    // ~$22 — discourages tight wrap/unwrap loops
 
         // Genesis: airdrop to CDC #1 owner
         ComradeGenesis genesis = new ComradeGenesis(cdcOg, renderer);

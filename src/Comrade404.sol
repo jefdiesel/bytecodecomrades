@@ -48,9 +48,12 @@ contract Comrade404 {
     address public owner;
     address payable public treasury;
     /// @dev Claim fee in ETH (wei). Sent to treasury when a holder calls claim().
-    /// Default suggested: ~$5 worth of ETH (e.g. 1.67e15 wei at $3000 ETH).
     /// Update via setClaimFee() as ETH price moves, or set to 0 for free claims.
     uint256 public claimFeeWei;
+    /// @dev Unclaim fee in ETH (wei). Sent to treasury when a holder calls unclaim().
+    /// Discourages tight round-trip wrapping/unwrapping for grief or arbitrage.
+    /// Update via setUnclaimFee(), or set to 0 for free unclaims.
+    uint256 public unclaimFeeWei;
 
     ISeedSource public seed;
     IComradeRenderer public renderer;
@@ -80,6 +83,7 @@ contract Comrade404 {
     event BloomSet(address indexed bloom);
     event TreasurySet(address indexed treasury);
     event ClaimFeeSet(uint256 feeWei);
+    event UnclaimFeeSet(uint256 feeWei);
     event ClaimFeePaid(address indexed payer, address indexed treasury, uint256 amount);
     event ComradeClaimed(address indexed holder, uint256 indexed comradeId, uint256 indexed claimedId, uint256 fee);
     event ComradeUnclaimed(address indexed holder, uint256 indexed claimedId, uint256 indexed newComradeId);
@@ -96,6 +100,7 @@ contract Comrade404 {
     error TreasuryNotSet();
     error TransferDisabled();   // ERC-721 transfer not allowed; use ERC-20
     error WrongClaimFee();      // msg.value didn't match claimFeeWei
+    error WrongUnclaimFee();    // msg.value didn't match unclaimFeeWei
     error TreasuryRejectedEth();
 
     modifier onlyOwner() {
@@ -169,6 +174,11 @@ contract Comrade404 {
     function setClaimFee(uint256 feeWei) external onlyOwner {
         claimFeeWei = feeWei;
         emit ClaimFeeSet(feeWei);
+    }
+
+    function setUnclaimFee(uint256 feeWei) external onlyOwner {
+        unclaimFeeWei = feeWei;
+        emit UnclaimFeeSet(feeWei);
     }
 
     // -------- ERC-20 --------
@@ -326,14 +336,23 @@ contract Comrade404 {
     }
 
     /// @notice Burn a ComradeClaimed ERC-721 and return its wrapped COMRADE.
-    /// Mints a fresh in-404 Comrade with the same original seed. No fee on unclaim.
-    function unclaim(uint256 claimedId) external returns (uint256 newComradeId) {
+    /// Mints a fresh in-404 Comrade with the same original seed.
+    /// Caller must send exactly `unclaimFeeWei` ETH as msg.value. Fee goes to treasury.
+    function unclaim(uint256 claimedId) external payable returns (uint256 newComradeId) {
         if (address(claimedNft) == address(0)) revert ClaimedNotConfigured();
         if (claimedNft.ownerOf(claimedId) != msg.sender) revert NotClaimedHolder();
+        if (treasury == address(0) && unclaimFeeWei > 0) revert TreasuryNotSet();
+        if (msg.value != unclaimFeeWei) revert WrongUnclaimFee();
 
         (bytes32 oldSeed,,) = claimedNft.claimed(claimedId);
 
         claimedNft.burn(claimedId);
+
+        if (msg.value > 0) {
+            (bool ok, ) = treasury.call{value: msg.value}("");
+            if (!ok) revert TreasuryRejectedEth();
+            emit ClaimFeePaid(msg.sender, treasury, msg.value);
+        }
 
         unchecked {
             balanceOf[address(this)] -= tokensPerComrade;
