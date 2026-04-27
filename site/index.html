@@ -159,6 +159,7 @@
   <button class="tab active" data-tab="all">All</button>
   <button class="tab" data-tab="claimed">Claimed</button>
   <button class="tab" data-tab="mine" id="tab-mine" style="display:none;">Mine</button>
+  <button class="tab" data-tab="trade">Trade</button>
 </div>
 
 <!-- ============ ALL (every BCC ever minted, ephemeral) ============ -->
@@ -198,6 +199,42 @@
     <div class="grid" id="claimed-grid"></div>
     <div id="claimed-sentinel" style="height:40px;"></div>
     <div id="status-claimed"></div>
+  </div>
+</div>
+
+<!-- ============ TRADE (Uniswap v4 swap) ============ -->
+<div class="panel" id="panel-trade">
+  <div>
+    <fieldset>
+      <legend>Swap</legend>
+      <div style="display:flex; gap:6px; margin-bottom:12px;">
+        <button id="trade-tab-buy"  class="ghost" style="flex:1;">Buy BCC</button>
+        <button id="trade-tab-sell" class="ghost" style="flex:1;">Sell BCC</button>
+      </div>
+      <label id="trade-in-label">You pay (ETH)</label>
+      <input id="trade-amount-in" type="text" inputmode="decimal" placeholder="0.0">
+      <label id="trade-out-label" style="margin-top:12px;">You receive (BCC, est.)</label>
+      <input id="trade-amount-out" type="text" readonly placeholder="0.0">
+      <label style="margin-top:12px;">Max slippage (%)</label>
+      <input id="trade-slippage" type="number" step="0.1" min="0.1" max="50" value="1">
+      <button id="trade-btn" disabled>Connect wallet first</button>
+      <p class="sub" style="margin-top:12px;">Quotes are approximate (linear at the launch anchor). Slippage is enforced on-chain — your tx reverts if the pool moves past your tolerance. Hook fee (0.1%) is included in the estimate.</p>
+      <div class="status" id="trade-status" style="margin-top:8px;"></div>
+    </fieldset>
+  </div>
+  <div>
+    <fieldset>
+      <legend>Pool</legend>
+      <div style="font-size:11px; color:var(--muted); line-height:1.7;">
+        <div>Pair: <span class="addr">BCC / ETH</span></div>
+        <div>Hook: <span class="addr">v4 afterSwap (0.1% fee → treasury)</span></div>
+        <div>Anchor price at launch: <span class="addr">$1 / BCC</span></div>
+        <div style="margin-top:8px;">Each buy mints a new in-404 NFT to your wallet with a fresh seed.<br>Each sell burns whichever NFT you held last (LIFO).</div>
+        <div style="margin-top:8px;">
+          Router: <a id="trade-router-link" target="_blank" style="color:var(--accent);" class="addr">—</a>
+        </div>
+      </div>
+    </fieldset>
   </div>
 </div>
 
@@ -246,6 +283,11 @@ const CHAIN              = "eth-sepolia";
 const BCC_CONTRACT       = "0x11935c26a2ad83c49507793b036b976790457ef9";
 const CLAIMED_CONTRACT   = "0x5da70bb34674f604a2f10ac234162440875225ee";
 const GENESIS_CONTRACT   = "0xf276811e32e7c74eccf6033e9739dbbb2d83dac5";
+const SWAP_CONTRACT      = "0xb0e626ea8993654385807e63ca112db36c8f15d6";
+
+// Pool anchor for quote approximations (BCC = $1 at $3k ETH → 3000 BCC per ETH).
+const ETH_USD            = 3000;
+const HOOK_FEE_BPS       = 10;     // 0.1%
 
 // Function selectors
 const SEL_TOKEN_URI    = "c87b56dd";  // tokenURI(uint256)
@@ -257,6 +299,10 @@ const SEL_CLAIM        = "379607f5";  // claim(uint256)
 const SEL_UNCLAIM      = "4b6a5e13";  // unclaim(uint256)  — payable, on Comrade404
 const SEL_CLAIM_FEE    = "9596fd4d";  // claimFeeWei()
 const SEL_UNCLAIM_FEE  = "1f17f043";  // unclaimFeeWei()
+const SEL_APPROVE      = "095ea7b3";  // approve(address,uint256)  — ERC-20
+const SEL_ALLOWANCE    = "dd62ed3e";  // allowance(address,address)  — ERC-20
+const SEL_BUY          = "d6febde8";  // buy(uint256,uint256) — payable, ComradeSwap
+const SEL_SELL         = "d3c9727c";  // sell(uint256,uint256,uint256) — ComradeSwap
 const SEL_BALANCE_OF   = "70a08231";  // balanceOf(address)
 const SEL_TOKENS_PER   = "491a71cd";  // tokensPerComrade()
 
@@ -554,6 +600,153 @@ async function loadMine() {
   }
 }
 
+// =============== TRADE (swap) ===============
+let tradeMode = "buy"; // "buy" or "sell"
+
+function setTradeMode(mode) {
+  tradeMode = mode;
+  $("trade-tab-buy").style.background  = mode === "buy"  ? "var(--accent)" : "transparent";
+  $("trade-tab-buy").style.color       = mode === "buy"  ? "#000"          : "var(--muted)";
+  $("trade-tab-sell").style.background = mode === "sell" ? "var(--accent)" : "transparent";
+  $("trade-tab-sell").style.color      = mode === "sell" ? "#000"          : "var(--muted)";
+  if (mode === "buy") {
+    $("trade-in-label").textContent  = "You pay (ETH)";
+    $("trade-out-label").textContent = "You receive (BCC, est.)";
+  } else {
+    $("trade-in-label").textContent  = "You sell (BCC)";
+    $("trade-out-label").textContent = "You receive (ETH, est.)";
+  }
+  updateTradeQuote();
+  updateTradeButton();
+}
+$("trade-tab-buy").onclick  = () => setTradeMode("buy");
+$("trade-tab-sell").onclick = () => setTradeMode("sell");
+
+function updateTradeQuote() {
+  const v = parseFloat($("trade-amount-in").value);
+  if (!v || v <= 0) { $("trade-amount-out").value = ""; return; }
+  // Linear approx at the launch anchor: 1 ETH = ETH_USD BCC, minus 0.1% hook fee.
+  const fee = 1 - HOOK_FEE_BPS / 10000;
+  const out = tradeMode === "buy" ? v * ETH_USD * fee : (v / ETH_USD) * fee;
+  $("trade-amount-out").value = out.toPrecision(6);
+}
+$("trade-amount-in").addEventListener("input", () => { updateTradeQuote(); updateTradeButton(); });
+$("trade-slippage").addEventListener("input", updateTradeButton);
+
+function updateTradeButton() {
+  const btn = $("trade-btn");
+  if (!walletAddr) { btn.disabled = true; btn.textContent = "Connect wallet first"; return; }
+  const v = parseFloat($("trade-amount-in").value);
+  if (!v || v <= 0)   { btn.disabled = true; btn.textContent = "Enter an amount"; return; }
+  btn.disabled = false;
+  btn.textContent = tradeMode === "buy" ? `Buy BCC` : `Sell BCC`;
+}
+
+$("trade-btn").onclick = async () => {
+  if (!walletAddr) return;
+  const status = $("trade-status");
+  status.className = "status";
+  status.textContent = "Preparing transaction…";
+  $("trade-btn").disabled = true;
+  try {
+    // Switch chain if needed
+    const wantChainHex = CHAIN_HEX[CHAIN];
+    const curChainHex  = await window.ethereum.request({ method: "eth_chainId" });
+    if (curChainHex !== wantChainHex) {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: wantChainHex }],
+      });
+    }
+
+    const amountIn   = parseFloat($("trade-amount-in").value);
+    const slippagePct = parseFloat($("trade-slippage").value || "1");
+    const fee         = 1 - HOOK_FEE_BPS / 10000;
+    const expectedOut = tradeMode === "buy" ? amountIn * ETH_USD * fee : (amountIn / ETH_USD) * fee;
+    const minOut      = expectedOut * (1 - slippagePct / 100);
+    const deadline    = Math.floor(Date.now() / 1000) + 600; // 10 min
+
+    if (tradeMode === "buy") {
+      // value = amountIn ETH; minBccOut = minOut BCC (×1e18)
+      const valWei = bigToHex(BigInt(Math.floor(amountIn * 1e18)));
+      const minBccOutWei = bigToHex(BigInt(Math.floor(minOut * 1e18)));
+      const data = "0x" + SEL_BUY + minBccOutWei.slice(2).padStart(64, "0") + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
+      const txHash = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data, value: valWei }],
+      });
+      status.className = "status ok";
+      status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
+      const ok = await waitReceipt(txHash);
+      if (ok)  status.textContent = `Bought ~${expectedOut.toPrecision(4)} BCC. Check Mine tab.`;
+      else     { status.className = "status err"; status.textContent = "Tx reverted (likely slippage). Try a higher tolerance."; }
+    } else {
+      // SELL: ensure approval, then call sell()
+      const amountWei    = BigInt(Math.floor(amountIn * 1e18));
+      const minEthOutWei = BigInt(Math.floor(minOut * 1e18));
+
+      const allowanceHex = await ethCall(CHAIN, BCC_CONTRACT,
+        "0x" + SEL_ALLOWANCE + encAddr(walletAddr) + encAddr(SWAP_CONTRACT));
+      const currentAllowance = decodeUint256(allowanceHex);
+      if (currentAllowance < amountWei) {
+        status.textContent = "Approving BCC… (1 of 2 txs)";
+        // approve max so users only ever do this once
+        const approveData = "0x" + SEL_APPROVE + encAddr(SWAP_CONTRACT) + "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        const approveHash = await window.ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{ from: walletAddr, to: BCC_CONTRACT, data: approveData }],
+        });
+        const approved = await waitReceipt(approveHash);
+        if (!approved) { status.className = "status err"; status.textContent = "Approval failed."; return; }
+        status.textContent = "Approved. Sending swap… (2 of 2 txs)";
+      }
+
+      const data = "0x" + SEL_SELL
+        + bigToHex(amountWei).slice(2).padStart(64, "0")
+        + bigToHex(minEthOutWei).slice(2).padStart(64, "0")
+        + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
+      const txHash = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data }],
+      });
+      status.className = "status ok";
+      status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
+      const ok = await waitReceipt(txHash);
+      if (ok) status.textContent = `Sold ${amountIn} BCC for ~${expectedOut.toPrecision(4)} ETH.`;
+      else { status.className = "status err"; status.textContent = "Tx reverted (likely slippage)."; }
+    }
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = e?.message?.slice(0, 200) || String(e);
+  } finally {
+    updateTradeButton();
+  }
+};
+
+function bigToHex(v) { return "0x" + v.toString(16); }
+
+async function waitReceipt(txHash) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const r = await fetch(rpcUrl(CHAIN), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc:"2.0", method:"eth_getTransactionReceipt", params:[txHash], id:1 }),
+    });
+    const j = await r.json();
+    if (j.result) return j.result.status === "0x1";
+  }
+  return false;
+}
+
+// Set up Trade tab
+(function initTrade() {
+  setTradeMode("buy");
+  const explorer = CHAIN === "eth-mainnet" ? "https://etherscan.io" : "https://sepolia.etherscan.io";
+  const link = $("trade-router-link");
+  link.href = `${explorer}/address/${SWAP_CONTRACT}`;
+  link.textContent = SWAP_CONTRACT.slice(0,6) + "…" + SWAP_CONTRACT.slice(-4);
+})();
+
 // Auto-load All on first visit
 window.addEventListener("DOMContentLoaded", () => setTimeout(startAll, 200));
 
@@ -641,6 +834,7 @@ function renderWalletBar() {
       document.querySelector('.tab[data-tab="all"]').click();
     }
   }
+  if (typeof updateTradeButton === "function") updateTradeButton();
 }
 
 $("wallet-connect").onclick = () => {

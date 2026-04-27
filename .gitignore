@@ -36,3 +36,4 @@ samples/viewer.local.*
 __pycache__/
 *.pyc
 .gstack/
+.vercel
