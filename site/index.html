@@ -595,10 +595,6 @@ function renderGrid(elId, ids, metas, chain, contract, opts) {
     if (meta && !meta.__error && meta.image) renderImage(wrap, meta.image);
     else wrap.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;">err</div>';
     cell.appendChild(wrap);
-    const lbl = document.createElement("div");
-    lbl.className = "lbl";
-    lbl.textContent = "#" + id.toString();
-    cell.appendChild(lbl);
     cell.onclick = () => openDetail(id, meta);
     grid.appendChild(cell);
   });
@@ -606,7 +602,9 @@ function renderGrid(elId, ids, metas, chain, contract, opts) {
 
 // =============== DETAIL MODAL ===============
 function openDetail(id, meta) {
-  $("detail-name").textContent = (meta && meta.name) || ("Comrade #" + id.toString());
+  // IDs aren't part of the identity — strip the "#N" suffix the renderer adds.
+  const rawName = (meta && meta.name) || "Bytecode Comrade";
+  $("detail-name").textContent = rawName.replace(/\s*#\d+\s*$/, "");
   const canvas = $("detail-canvas");
   if (meta && !meta.__error && meta.image) renderImage(canvas, meta.image);
   else canvas.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">no image</div>';
