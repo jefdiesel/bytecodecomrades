@@ -53,11 +53,15 @@ contract ComradeSwap is IUnlockCallback {
         require(address(_comrade) < address(_weth), "BCC must be token0");
     }
 
-    /// @notice Buy BCC with ETH. msg.value is the input.
-    function buy(uint256 minBccOut, uint256 deadline) external payable returns (uint256 bccOut) {
+    /// @notice Buy an EXACT number of BCC, pay up to msg.value ETH. Refund the rest.
+    /// Forces whole-BCC outputs so each unit corresponds to a real Comrade NFT.
+    function buy(uint256 bccOut, uint256 maxEthIn, uint256 deadline) external payable returns (uint256 ethSpent) {
         if (block.timestamp > deadline) revert Expired();
-        bccOut = abi.decode(
-            poolManager.unlock(abi.encode(CB(msg.sender, true, msg.value, minBccOut))),
+        require(msg.value >= maxEthIn, "msg.value < maxEthIn");
+        // Encoding: amountIn field carries the exact-output bcc target,
+        // minOut field carries maxEthIn (interpreted as "max input" in callback).
+        ethSpent = abi.decode(
+            poolManager.unlock(abi.encode(CB(msg.sender, true, bccOut, maxEthIn))),
             (uint256)
         );
     }
@@ -76,11 +80,13 @@ contract ComradeSwap is IUnlockCallback {
         if (msg.sender != address(poolManager)) revert WrongCallback();
         CB memory p = abi.decode(raw, (CB));
 
-        // BCC=token0, WETH=token1. Buy = WETH-in/BCC-out (oneForZero = !zeroForOne).
+        // BCC=token0, WETH=token1.
+        // Buy:  zeroForOne=false, EXACT-OUTPUT (positive amountSpecified = bcc target)
+        // Sell: zeroForOne=true,  EXACT-INPUT  (negative amountSpecified = bcc paid)
         bool zeroForOne = !p.isBuy;
         IPoolManager.SwapParams memory sp = IPoolManager.SwapParams({
             zeroForOne:        zeroForOne,
-            amountSpecified:   -int256(p.amountIn),
+            amountSpecified:   p.isBuy ? int256(p.amountIn) : -int256(p.amountIn),
             sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
         });
 
@@ -89,22 +95,23 @@ contract ComradeSwap is IUnlockCallback {
         int256 d1 = int256(delta.amount1());
 
         if (p.isBuy) {
-            // Owe WETH (token1, negative), receive BCC (token0, positive).
+            // Exact-output: pool consumed -d1 WETH, returned +d0 BCC (= bccOut target).
             uint256 wethOwed = uint256(-d1);
+            // Slippage guard: maxEthIn was passed in p.minOut
+            if (wethOwed > p.minOut) revert InsufficientOutput();
             weth.deposit{value: wethOwed}();
             weth.transfer(address(poolManager), wethOwed);
             poolManager.settle();
 
             uint256 bccOut = uint256(d0);
-            if (bccOut < p.minOut) revert InsufficientOutput();
             poolManager.take(key.currency0, p.sender, bccOut);
 
-            // Refund any ETH leftover (e.g. user sent extra)
+            // Refund any leftover ETH
             if (address(this).balance > 0) {
                 (bool ok,) = p.sender.call{value: address(this).balance}("");
                 if (!ok) revert EthRefundFailed();
             }
-            return abi.encode(bccOut);
+            return abi.encode(wethOwed);  // return ETH spent (frontend can show)
         } else {
             // Owe BCC (token0, negative), receive WETH (token1, positive).
             uint256 bccOwed = uint256(-d0);

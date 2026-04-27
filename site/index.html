@@ -211,14 +211,14 @@
         <button id="trade-tab-buy"  class="ghost" style="flex:1;">Buy BCC</button>
         <button id="trade-tab-sell" class="ghost" style="flex:1;">Sell BCC</button>
       </div>
-      <label id="trade-in-label">You pay (ETH)</label>
-      <input id="trade-amount-in" type="text" inputmode="decimal" placeholder="0.0">
-      <label id="trade-out-label" style="margin-top:12px;">You receive (BCC, est.)</label>
+      <label id="trade-in-label">Comrades to buy</label>
+      <input id="trade-amount-in" type="number" min="1" step="1" placeholder="1">
+      <label id="trade-out-label" style="margin-top:12px;">Estimated ETH cost</label>
       <input id="trade-amount-out" type="text" readonly placeholder="0.0">
       <label style="margin-top:12px;">Max slippage (%)</label>
       <input id="trade-slippage" type="number" step="0.1" min="0.1" max="50" value="1">
       <button id="trade-btn" disabled>Connect wallet first</button>
-      <p class="sub" style="margin-top:12px;">Quotes are approximate (linear at the launch anchor). Slippage is enforced on-chain — your tx reverts if the pool moves past your tolerance. Hook fee (0.1%) is included in the estimate.</p>
+      <p class="sub" style="margin-top:12px;">BCC trades in whole units only — each one is an NFT. Buys use exact-output: you specify how many Comrades, the router pulls the right amount of ETH and refunds any excess. Slippage is enforced on-chain. Hook fee (0.1%) included.</p>
       <div class="status" id="trade-status" style="margin-top:8px;"></div>
     </fieldset>
   </div>
@@ -283,7 +283,7 @@ const CHAIN              = "eth-sepolia";
 const BCC_CONTRACT       = "0x11935c26a2ad83c49507793b036b976790457ef9";
 const CLAIMED_CONTRACT   = "0x5da70bb34674f604a2f10ac234162440875225ee";
 const GENESIS_CONTRACT   = "0xf276811e32e7c74eccf6033e9739dbbb2d83dac5";
-const SWAP_CONTRACT      = "0xb0e626ea8993654385807e63ca112db36c8f15d6";
+const SWAP_CONTRACT      = "0x66B1d1835d8fe0b946A9372F683f6b4A846ea08A";
 
 // Pool anchor for quote approximations (BCC = $1 at $3k ETH → 3000 BCC per ETH).
 const ETH_USD            = 3000;
@@ -610,11 +610,11 @@ function setTradeMode(mode) {
   $("trade-tab-sell").style.background = mode === "sell" ? "var(--accent)" : "transparent";
   $("trade-tab-sell").style.color      = mode === "sell" ? "#000"          : "var(--muted)";
   if (mode === "buy") {
-    $("trade-in-label").textContent  = "You pay (ETH)";
-    $("trade-out-label").textContent = "You receive (BCC, est.)";
+    $("trade-in-label").textContent  = "Comrades to buy";
+    $("trade-out-label").textContent = "Estimated ETH cost";
   } else {
-    $("trade-in-label").textContent  = "You sell (BCC)";
-    $("trade-out-label").textContent = "You receive (ETH, est.)";
+    $("trade-in-label").textContent  = "Comrades to sell";
+    $("trade-out-label").textContent = "Estimated ETH return";
   }
   updateTradeQuote();
   updateTradeButton();
@@ -623,12 +623,16 @@ $("trade-tab-buy").onclick  = () => setTradeMode("buy");
 $("trade-tab-sell").onclick = () => setTradeMode("sell");
 
 function updateTradeQuote() {
-  const v = parseFloat($("trade-amount-in").value);
-  if (!v || v <= 0) { $("trade-amount-out").value = ""; return; }
-  // Linear approx at the launch anchor: 1 ETH = ETH_USD BCC, minus 0.1% hook fee.
-  const fee = 1 - HOOK_FEE_BPS / 10000;
-  const out = tradeMode === "buy" ? v * ETH_USD * fee : (v / ETH_USD) * fee;
-  $("trade-amount-out").value = out.toPrecision(6);
+  const n = parseInt($("trade-amount-in").value, 10);
+  if (!n || n <= 0) { $("trade-amount-out").value = ""; return; }
+  // Linear approx at the launch anchor: 1 BCC = 1/ETH_USD ETH.
+  // Buy: pay ETH = n / ETH_USD × (1 + hook_fee)  (you pay slightly more for the fee)
+  // Sell: receive ETH = n / ETH_USD × (1 - hook_fee)
+  const fee = HOOK_FEE_BPS / 10000;
+  const ethAmount = tradeMode === "buy"
+    ? (n / ETH_USD) * (1 + fee)
+    : (n / ETH_USD) * (1 - fee);
+  $("trade-amount-out").value = ethAmount.toPrecision(6) + " ETH";
 }
 $("trade-amount-in").addEventListener("input", () => { updateTradeQuote(); updateTradeButton(); });
 $("trade-slippage").addEventListener("input", updateTradeButton);
@@ -636,10 +640,10 @@ $("trade-slippage").addEventListener("input", updateTradeButton);
 function updateTradeButton() {
   const btn = $("trade-btn");
   if (!walletAddr) { btn.disabled = true; btn.textContent = "Connect wallet first"; return; }
-  const v = parseFloat($("trade-amount-in").value);
-  if (!v || v <= 0)   { btn.disabled = true; btn.textContent = "Enter an amount"; return; }
+  const n = parseInt($("trade-amount-in").value, 10);
+  if (!n || n <= 0) { btn.disabled = true; btn.textContent = "Enter a whole number"; return; }
   btn.disabled = false;
-  btn.textContent = tradeMode === "buy" ? `Buy BCC` : `Sell BCC`;
+  btn.textContent = tradeMode === "buy" ? `Buy ${n} Comrade${n>1?"s":""}` : `Sell ${n} Comrade${n>1?"s":""}`;
 }
 
 $("trade-btn").onclick = async () => {
@@ -659,31 +663,39 @@ $("trade-btn").onclick = async () => {
       });
     }
 
-    const amountIn   = parseFloat($("trade-amount-in").value);
+    const n           = parseInt($("trade-amount-in").value, 10);
     const slippagePct = parseFloat($("trade-slippage").value || "1");
-    const fee         = 1 - HOOK_FEE_BPS / 10000;
-    const expectedOut = tradeMode === "buy" ? amountIn * ETH_USD * fee : (amountIn / ETH_USD) * fee;
-    const minOut      = expectedOut * (1 - slippagePct / 100);
-    const deadline    = Math.floor(Date.now() / 1000) + 600; // 10 min
+    const fee         = HOOK_FEE_BPS / 10000;
+    const ethAtAnchor = n / ETH_USD;  // ETH equivalent at $1 anchor
+    const deadline    = Math.floor(Date.now() / 1000) + 600;
 
     if (tradeMode === "buy") {
-      // value = amountIn ETH; minBccOut = minOut BCC (×1e18)
-      const valWei = bigToHex(BigInt(Math.floor(amountIn * 1e18)));
-      const minBccOutWei = bigToHex(BigInt(Math.floor(minOut * 1e18)));
-      const data = "0x" + SEL_BUY + minBccOutWei.slice(2).padStart(64, "0") + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
+      // EXACT-OUTPUT buy: specify exactly N BCC, allow up to maxEthIn worth of ETH.
+      // Estimate ETH cost at anchor + hook fee + slippage tolerance.
+      const ethEstimate = ethAtAnchor * (1 + fee);
+      const maxEthIn = ethEstimate * (1 + slippagePct / 100);
+      const bccOutWei  = BigInt(n) * (10n ** 18n);
+      const maxEthInWei = BigInt(Math.floor(maxEthIn * 1e18));
+      // Send msg.value = maxEthIn so the router can spend up to that. Excess refunded.
+      const data = "0x" + SEL_BUY
+        + bigToHex(bccOutWei).slice(2).padStart(64, "0")
+        + bigToHex(maxEthInWei).slice(2).padStart(64, "0")
+        + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
       const txHash = await window.ethereum.request({
         method: "eth_sendTransaction",
-        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data, value: valWei }],
+        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data, value: bigToHex(maxEthInWei) }],
       });
       status.className = "status ok";
       status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
       const ok = await waitReceipt(txHash);
-      if (ok)  status.textContent = `Bought ~${expectedOut.toPrecision(4)} BCC. Check Mine tab.`;
-      else     { status.className = "status err"; status.textContent = "Tx reverted (likely slippage). Try a higher tolerance."; }
+      if (ok) status.textContent = `Bought ${n} Comrade${n>1?"s":""}. Excess ETH refunded. Check Mine tab.`;
+      else    { status.className = "status err"; status.textContent = "Tx reverted (likely slippage). Try higher tolerance or smaller order."; }
     } else {
-      // SELL: ensure approval, then call sell()
-      const amountWei    = BigInt(Math.floor(amountIn * 1e18));
-      const minEthOutWei = BigInt(Math.floor(minOut * 1e18));
+      // SELL: exact-input on BCC. Need approval first.
+      const ethEstimate = ethAtAnchor * (1 - fee);
+      const minEthOut   = ethEstimate * (1 - slippagePct / 100);
+      const amountWei    = BigInt(n) * (10n ** 18n);
+      const minEthOutWei = BigInt(Math.floor(minEthOut * 1e18));
 
       const allowanceHex = await ethCall(CHAIN, BCC_CONTRACT,
         "0x" + SEL_ALLOWANCE + encAddr(walletAddr) + encAddr(SWAP_CONTRACT));
@@ -712,7 +724,7 @@ $("trade-btn").onclick = async () => {
       status.className = "status ok";
       status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
       const ok = await waitReceipt(txHash);
-      if (ok) status.textContent = `Sold ${amountIn} BCC for ~${expectedOut.toPrecision(4)} ETH.`;
+      if (ok) status.textContent = `Sold ${n} Comrade${n>1?"s":""} for ~${ethAtAnchor.toPrecision(4)} ETH.`;
       else { status.className = "status err"; status.textContent = "Tx reverted (likely slippage)."; }
     }
   } catch (e) {
