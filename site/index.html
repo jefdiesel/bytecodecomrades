@@ -101,14 +101,42 @@
 <p class="sub">On-chain art. Procedurally generated. Born from Uniswap v4 swaps.</p>
 
 <div class="tabs">
-  <button class="tab active" data-tab="single">Lookup</button>
+  <button class="tab active" data-tab="genesis">Genesis</button>
+  <button class="tab" data-tab="single">Lookup</button>
   <button class="tab" data-tab="wallet">By Wallet</button>
   <button class="tab" data-tab="browse">Browse All</button>
   <button class="tab" data-tab="settings">Settings</button>
 </div>
 
+<!-- ============ GENESIS ============ -->
+<div class="panel active" id="panel-genesis">
+  <div>
+    <fieldset>
+      <legend>Genesis Bytecode Comrade</legend>
+      <p class="sub" style="margin:0 0 12px;">A single soulbound NFT — homage to <a href="#" id="cdc1-link" style="color:var(--accent);">CDC #1</a>. Auto-airdropped at launch to the wallet that owned Comrade #1. Cannot be transferred, sold, or burned. One forever.</p>
+      <label>Chain</label>
+      <select class="chain"></select>
+      <button id="go-genesis">Load Genesis</button>
+    </fieldset>
+  </div>
+  <div>
+    <div class="canvas" id="genesis-canvas">
+      <div class="placeholder">click load</div>
+    </div>
+    <div class="meta" id="genesis-meta" style="display:none; margin-top:16px;">
+      <h2>Metadata</h2>
+      <div class="name" id="genesis-name"></div>
+      <div class="traits" id="genesis-traits"></div>
+      <div style="margin-top:12px; font-size:11px; color:var(--muted);">
+        Owner: <span id="genesis-owner" style="color:var(--accent);"></span>
+      </div>
+    </div>
+    <div id="status-genesis" style="margin-top:8px;"></div>
+  </div>
+</div>
+
 <!-- ============ SINGLE LOOKUP ============ -->
-<div class="panel active" id="panel-single">
+<div class="panel" id="panel-single">
   <div>
     <fieldset>
       <legend>Single Comrade</legend>
@@ -217,10 +245,12 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const CONTRACT_KEY = "contract_addr_v2";
 const CHAIN_KEY    = "chain_v2";
 
-// Hardwired contract — currently the Sepolia testnet deploy.
-// Update to mainnet address once deployed.
+// Hardwired contracts — currently the Sepolia testnet deploy.
+// Update to mainnet addresses once deployed.
 const DEFAULT_CONTRACT = "0xb215f556b0f2e3f62105a4309bb35b2258bed13a";
 const DEFAULT_CHAIN    = "eth-sepolia";
+const GENESIS_CONTRACT = "0xe6497582a0e3154c3cf221ef92ec464e20aa05ea";
+const GENESIS_TOKEN_ID = 0;
 
 const CHAINS = [
   ["eth-mainnet",   "Ethereum Mainnet"],
@@ -354,6 +384,42 @@ async function pmap(items, n, fn) {
   await Promise.all(Array.from({length: n}, worker));
   return out;
 }
+
+// =============== GENESIS ===============
+$("go-genesis").onclick = loadGenesis;
+async function loadGenesis() {
+  $("status-genesis").textContent = "";
+  $("genesis-meta").style.display = "none";
+  $("genesis-canvas").innerHTML = '<div class="placeholder">loading...</div>';
+  $("go-genesis").disabled = true;
+  try {
+    const chain = $$("select.chain")[0].value;
+    // tokenURI(uint256)
+    const uriHex = await ethCall(chain, GENESIS_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(GENESIS_TOKEN_ID));
+    const uri = decodeString(uriHex);
+    const meta = parseTokenURI(uri);
+    renderImage($("genesis-canvas"), meta.image);
+    $("genesis-name").textContent = meta.name || "(no name)";
+    const t = $("genesis-traits"); t.innerHTML = "";
+    for (const a of meta.attributes || []) {
+      const el = document.createElement("div");
+      el.className = "trait";
+      el.innerHTML = `<div class="k">${esc(a.trait_type)}</div><div class="v">${esc(a.value)}</div>`;
+      t.appendChild(el);
+    }
+    // ownerOf(uint256) — selector 0x6352211e
+    const ownerHex = await ethCall(chain, GENESIS_CONTRACT, "0x6352211e" + encU256(GENESIS_TOKEN_ID));
+    const owner = "0x" + ownerHex.slice(-40);
+    $("genesis-owner").textContent = owner;
+    $("genesis-meta").style.display = "";
+    setStatus("genesis", "ok", "Loaded.");
+  } catch (e) {
+    $("genesis-canvas").innerHTML = '<div class="placeholder">error</div>';
+    setStatus("genesis", "err", e.message || String(e));
+  } finally { $("go-genesis").disabled = false; }
+}
+// Auto-load on first visit (tab is active by default)
+window.addEventListener("DOMContentLoaded", () => setTimeout(loadGenesis, 200));
 
 // =============== SINGLE ===============
 $("rand").onclick = () => { $("single-id").value = Math.floor(Math.random() * 10000); };
