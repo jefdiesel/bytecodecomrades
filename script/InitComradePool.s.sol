@@ -10,6 +10,11 @@ import {TickMath}         from "v4-core/libraries/TickMath.sol";
 
 /// @notice Initialize the Bytecode Comrades v4 pool with a weighted-curve LP plan.
 ///
+/// IMPORTANT: PAIR must be WETH, not native ETH (address(0)). The single-sided
+/// launch curve only works when BCC is token0 (lower address). Native ETH is
+/// always token0 (address(0)), forcing BCC = token1 — wrong direction. With
+/// WETH and BCC < WETH, BCC = token0 and the position math works as designed.
+///
 /// Strategy: three concentrated-liquidity positions across $1-$1111, weighted
 /// toward the low end so early buyers get fair pricing while preserving moonshot upside.
 ///
@@ -18,11 +23,14 @@ import {TickMath}         from "v4-core/libraries/TickMath.sol";
 ///   Position 3: $400 - $1111   |  700 tokens (7%)  | thin (moonshot)
 ///
 /// This script INITIALIZES the pool at the bottom of the range. The actual three
-/// LP deposits should be done via the Uniswap UI or a follow-up PositionManager
-/// script — paste the printed (tickLower, tickUpper, amount) values for each.
+/// LP deposits should be done via the Uniswap UI (handles Permit2 + PositionManager
+/// encoding) — paste the printed (tickLower, tickUpper, amount) values for each.
+///
+/// Mainnet WETH:  0xC02aaa39b223FE8D0A0e5C4F27eAD9083C756Cc2
+/// Sepolia WETH:  0xfff9976782d46cc05630d1f6ebab18b2324d6b14
 ///
 /// Run:
-///   COMRADE=<addr>  PAIR=<addr>  POOL_MANAGER=<addr>  HOOK=<addr> \
+///   COMRADE=<addr>  PAIR=<weth>  POOL_MANAGER=<addr>  HOOK=<addr> \
 ///   ETH_USD=3000 \
 ///   forge script script/InitComradePool.s.sol --rpc-url $RPC --private-key $PK --broadcast
 contract InitComradePool is Script {
@@ -49,10 +57,12 @@ contract InitComradePool is Script {
         address hook     = vm.envAddress("HOOK");
         uint256 ethUsd   = vm.envOr("ETH_USD", uint256(3000));
 
+        require(pair != address(0), "PAIR=0 (native ETH) makes BCC=token1 - use WETH");
         (address token0, address token1) = comrade < pair
             ? (comrade, pair)
             : (pair, comrade);
         bool comradeIsToken0 = (comrade < pair);
+        require(comradeIsToken0, "BCC >= PAIR (BCC must be token0 for the launch curve)");
 
         console2.log("== Bytecode Comrades pool init ==");
         console2.log("BCC:               ", comrade);

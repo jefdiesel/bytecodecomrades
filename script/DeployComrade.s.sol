@@ -8,10 +8,19 @@ import {IPoolManager}     from "v4-core/interfaces/IPoolManager.sol";
 import {ComradeHook}           from "../src/ComradeHook.sol";
 import {Comrade404}            from "../src/Comrade404.sol";
 import {ComradeSpriteData}     from "../src/ComradeSpriteData.sol";
+import {ComradeSpriteChunk0}   from "../src/ComradeSpriteChunk0.sol";
+import {ComradeSpriteChunk1}   from "../src/ComradeSpriteChunk1.sol";
+import {ComradeSpriteChunk2}   from "../src/ComradeSpriteChunk2.sol";
+import {ComradeSpriteChunk3}   from "../src/ComradeSpriteChunk3.sol";
+import {ComradeSpriteChunk4}   from "../src/ComradeSpriteChunk4.sol";
+import {ComradeBloom}          from "../src/ComradeBloom.sol";
+import {ComradeBloomChunk0}    from "../src/ComradeBloomChunk0.sol";
+import {ComradeBloomChunk1}    from "../src/ComradeBloomChunk1.sol";
 import {ComradeTaxonomy}       from "../src/ComradeTaxonomy.sol";
 import {ComradeRenderer}       from "../src/ComradeRenderer.sol";
 import {ComradeGenesis}        from "../src/ComradeGenesis.sol";
 import {IComradeRenderer}      from "../src/IComradeRenderer.sol";
+import {IComradeBloom}         from "../src/IComradeBloom.sol";
 
 /// @notice Full-stack deploy for the Comrade launch.
 ///
@@ -61,15 +70,40 @@ contract DeployComrade is Script {
         // 2. Broadcast deploys
         vm.startBroadcast();
 
-        ComradeSpriteData spriteData = new ComradeSpriteData();
+        // Deploy sprite chunks individually (each is ~22KB; deploying inline blew
+        // the EIP-3860 49152-byte initcode limit when bundled into one constructor)
+        address[5] memory spriteChunks = [
+            address(new ComradeSpriteChunk0()),
+            address(new ComradeSpriteChunk1()),
+            address(new ComradeSpriteChunk2()),
+            address(new ComradeSpriteChunk3()),
+            address(new ComradeSpriteChunk4())
+        ];
+        ComradeSpriteData spriteData = new ComradeSpriteData(spriteChunks);
         ComradeTaxonomy   taxonomy   = new ComradeTaxonomy();
         ComradeRenderer   renderer   = new ComradeRenderer(spriteData, taxonomy);
+
+        // Bloom filter (also chunked separately for the same reason)
+        address bloomChunk0 = address(new ComradeBloomChunk0());
+        address bloomChunk1 = address(new ComradeBloomChunk1());
+        ComradeBloom bloom = new ComradeBloom(bloomChunk0, bloomChunk1);
 
         ComradeHook hook = new ComradeHook{salt: salt}(IPoolManager(poolMgr));
         require(address(hook) == predicted, "hook addr mismatch");
 
         Comrade404 token = new Comrade404(hook, payable(treasury), maxComrades, tokensPerComrade);
+        // Address ordering check: BCC must be < WETH so it's token0 in the BCC/WETH pool.
+        // Otherwise the single-sided launch curve in InitComradePool prints positions
+        // for the wrong direction. WETH addresses: 0xC02aaa... (mainnet), 0xfff9... (Sepolia).
+        if (block.chainid == 1) {
+            require(address(token) < 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2,
+                "BCC >= WETH (mainnet) - re-roll deployer nonce");
+        } else if (block.chainid == 11155111) {
+            require(address(token) < 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14,
+                "BCC >= WETH (Sepolia) - re-roll deployer nonce");
+        }
         token.setRenderer(IComradeRenderer(address(renderer)));
+        token.setBloom(IComradeBloom(address(bloom)));
         token.setSkip(poolMgr, true);  // PoolManager holds liquidity, exempt from minting
         token.setClaimFee(0.001111 ether);  // ~$3.33 at $3k ETH; tweak via setClaimFee anytime
 
@@ -83,6 +117,7 @@ contract DeployComrade is Script {
         console2.log("ComradeSpriteData: ", address(spriteData));
         console2.log("ComradeTaxonomy:   ", address(taxonomy));
         console2.log("ComradeRenderer:   ", address(renderer));
+        console2.log("ComradeBloom:      ", address(bloom));
         console2.log("ComradeHook:       ", address(hook));
         console2.log("Comrade404:        ", address(token));
         console2.log("ComradeGenesis:    ", address(genesis));
