@@ -227,9 +227,11 @@
     <div class="traits" id="detail-traits"></div>
     <div class="claim-box" id="claim-box" style="display:none;">
       <div class="row"><span class="k">Owner</span><span class="v" id="claim-owner">-</span></div>
-      <div class="row"><span class="k">Claim fee</span><span class="v" id="claim-fee">-</span></div>
-      <button id="claim-btn">Claim as permanent NFT</button>
-      <p class="note">Claiming locks <span id="claim-locks">1 BCC</span> inside the contract and lifts this Comrade into a standalone ERC-721 (BCC-RARE) you can trade on any NFT marketplace. The claim fee is paid in ETH to the treasury.</p>
+      <div class="row"><span class="k" id="fee-label">Claim fee</span><span class="v" id="claim-fee">-</span></div>
+      <button id="claim-btn" style="display:none;">Claim as permanent NFT</button>
+      <button id="unclaim-btn" style="display:none;">Unclaim — burn ERC-721, recover BCC</button>
+      <p class="note" id="claim-note">Claiming locks <span id="claim-locks">1 BCC</span> inside the contract and lifts this Comrade into a standalone ERC-721 you can trade on any NFT marketplace. The claim fee is paid in ETH to the treasury.</p>
+      <p class="note" id="unclaim-note" style="display:none;">Unclaiming burns this permanent ERC-721 forever (it can never be reissued at this id), releases the locked BCC back to your wallet, and mints a fresh in-404 Comrade with the same seed. The unclaim fee is paid in ETH to the treasury.</p>
       <div class="status" id="claim-status"></div>
     </div>
   </div>
@@ -252,7 +254,9 @@ const SEL_NEXT_ID      = "12ae2c5f";  // nextComradeId()
 const SEL_OWNER_OF     = "6352211e";  // ownerOf(uint256) / comradeOwner(uint256) via BCC's ERC721 helper
 const SEL_COMRADE_OWNER= "d6b19d60";  // comradeOwner(uint256) — internal mapping
 const SEL_CLAIM        = "379607f5";  // claim(uint256)
+const SEL_UNCLAIM      = "4b6a5e13";  // unclaim(uint256)  — payable, on Comrade404
 const SEL_CLAIM_FEE    = "9596fd4d";  // claimFeeWei()
+const SEL_UNCLAIM_FEE  = "1f17f043";  // unclaimFeeWei()
 const SEL_BALANCE_OF   = "70a08231";  // balanceOf(address)
 const SEL_TOKENS_PER   = "491a71cd";  // tokensPerComrade()
 
@@ -498,7 +502,7 @@ async function loadMoreClaimed() {
     const r = await ethCall(CHAIN, CLAIMED_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(id));
     return parseTokenURI(decodeString(r));
   });
-  appendToGrid("claimed-grid", slice, metas, CLAIMED_CONTRACT, "rare");
+  appendToGrid("claimed-grid", slice, metas, CLAIMED_CONTRACT, "claimed");
   claimedState.loaded = end;
   claimedState.busy = false;
   $("claimed-progress").textContent = `${claimedState.loaded} of ${total} permanent Comrades.`;
@@ -541,7 +545,7 @@ window.addEventListener("DOMContentLoaded", () => setTimeout(startAll, 200));
 // =============== DETAIL MODAL ===============
 let currentDetailId = null;
 let currentDetailContract = null;
-let currentDetailKind = null; // "bcc" | "rare"
+let currentDetailKind = null; // "bcc" | "claimed"
 
 async function openDetail(id, meta, contract, kind) {
   currentDetailId = id;
@@ -634,38 +638,68 @@ async function refreshClaimBox() {
   box.style.display = "none";
   $("claim-status").textContent = "";
   $("claim-status").className = "status";
-  // No claim flow for already-claimed Rare ERC-721s.
-  if (currentDetailKind !== "bcc") return;
+  $("claim-btn").style.display = "none";
+  $("unclaim-btn").style.display = "none";
+  $("claim-note").style.display = "none";
+  $("unclaim-note").style.display = "none";
+
   if (!walletAddr || currentDetailId === null) return;
 
-  // Read owner + fee + tokensPerComrade + bcc balance in parallel
-  let owner, feeWei, perComrade, bccBal;
-  try {
-    [owner, feeWei, perComrade, bccBal] = await Promise.all([
-      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_OWNER_OF + encU256(currentDetailId)).then(r => "0x" + r.slice(-40)),
-      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_CLAIM_FEE).then(r => decodeUint256(r)),
-      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_TOKENS_PER).then(r => decodeUint256(r)),
-      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_BALANCE_OF + encAddr(walletAddr)).then(r => decodeUint256(r)),
-    ]);
-  } catch (e) {
-    console.warn("claim box read failed:", e);
+  if (currentDetailKind === "bcc") {
+    // 404 NFT → claim flow (read from Comrade404)
+    let owner, feeWei, perComrade, bccBal;
+    try {
+      [owner, feeWei, perComrade, bccBal] = await Promise.all([
+        ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_OWNER_OF + encU256(currentDetailId)).then(r => "0x" + r.slice(-40)),
+        ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_CLAIM_FEE).then(r => decodeUint256(r)),
+        ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_TOKENS_PER).then(r => decodeUint256(r)),
+        ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_BALANCE_OF + encAddr(walletAddr)).then(r => decodeUint256(r)),
+      ]);
+    } catch (e) { console.warn("claim box read failed:", e); return; }
+
+    $("claim-owner").textContent = shortAddr(owner);
+    $("fee-label").textContent   = "Claim fee";
+    $("claim-fee").textContent   = formatEth(feeWei) + " ETH";
+    $("claim-locks").textContent = `${formatEth(perComrade)} BCC`;
+    $("claim-btn").style.display = "";
+    $("claim-note").style.display = "";
+    box.style.display = "";
+
+    const isOwner   = owner.toLowerCase() === walletAddr.toLowerCase();
+    const enoughBcc = bccBal >= perComrade;
+    $("claim-btn").disabled = !(isOwner && enoughBcc);
+    if (!isOwner) {
+      $("claim-status").textContent = "Connect the wallet that owns this Comrade to claim.";
+    } else if (!enoughBcc) {
+      $("claim-status").textContent = `Need ${formatEth(perComrade)} BCC to lock — wallet has ${formatEth(bccBal)}.`;
+    }
     return;
   }
-  $("claim-owner").textContent = shortAddr(owner);
-  $("claim-fee").textContent = formatEth(feeWei) + " ETH";
-  $("claim-locks").textContent = `${formatEth(perComrade)} BCC`;
-  box.style.display = "";
 
-  const isOwner   = owner.toLowerCase() === walletAddr.toLowerCase();
-  const enoughBcc = bccBal >= perComrade;
-  $("claim-btn").disabled = !(isOwner && enoughBcc);
-  $("claim-status").className = "status";
-  if (!isOwner) {
-    $("claim-status").textContent = "Connect the wallet that owns this Comrade to claim.";
-  } else if (!enoughBcc) {
-    $("claim-status").textContent = `Need ${formatEth(perComrade)} BCC to lock at claim — wallet only has ${formatEth(bccBal)}.`;
-  } else {
-    $("claim-status").textContent = "";
+  if (currentDetailKind === "claimed") {
+    // ComradeClaimed ERC-721 → unclaim flow (read owner from Claimed contract,
+    // unclaim fee from Comrade404)
+    let owner, feeWei;
+    try {
+      [owner, feeWei] = await Promise.all([
+        ethCall(CHAIN, CLAIMED_CONTRACT, "0x" + SEL_OWNER_OF + encU256(currentDetailId)).then(r => "0x" + r.slice(-40)),
+        ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_UNCLAIM_FEE).then(r => decodeUint256(r)),
+      ]);
+    } catch (e) { console.warn("unclaim box read failed:", e); return; }
+
+    $("claim-owner").textContent = shortAddr(owner);
+    $("fee-label").textContent   = "Unclaim fee";
+    $("claim-fee").textContent   = formatEth(feeWei) + " ETH";
+    $("unclaim-btn").style.display = "";
+    $("unclaim-note").style.display = "";
+    box.style.display = "";
+
+    const isOwner = owner.toLowerCase() === walletAddr.toLowerCase();
+    $("unclaim-btn").disabled = !isOwner;
+    if (!isOwner) {
+      $("claim-status").textContent = "Connect the wallet that owns this Claimed NFT to unclaim.";
+    }
+    return;
   }
 }
 
@@ -720,9 +754,9 @@ $("claim-btn").onclick = async () => {
       return;
     }
     if (receipt.status === "0x1") {
-      status.textContent = "Claimed. Reload Mine + Claimed tabs to see the new ERC-721.";
-      // Invalidate caches so next visit refetches.
+      status.textContent = "Claimed. Switch to the Claimed tab to see your new permanent ERC-721.";
       claimedState = { total: 0, loaded: 0, busy: false };
+      $("claim-btn").style.display = "none";
     } else {
       status.className = "status err";
       status.textContent = "Transaction reverted on-chain.";
@@ -732,6 +766,65 @@ $("claim-btn").onclick = async () => {
     status.textContent = e?.message?.slice(0,140) || String(e);
   } finally {
     $("claim-btn").disabled = false;
+  }
+};
+
+$("unclaim-btn").onclick = async () => {
+  if (!walletAddr || currentDetailId === null || currentDetailKind !== "claimed") return;
+  const status = $("claim-status");
+  status.className = "status";
+  status.textContent = "Preparing transaction…";
+  $("unclaim-btn").disabled = true;
+  try {
+    const wantChainHex = CHAIN_HEX[CHAIN];
+    const curChainHex = await window.ethereum.request({ method: "eth_chainId" });
+    if (curChainHex !== wantChainHex) {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: wantChainHex }],
+      });
+    }
+    const feeWei = decodeUint256(await ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_UNCLAIM_FEE));
+    const data = "0x" + SEL_UNCLAIM + encU256(currentDetailId.toString());
+    const txHash = await window.ethereum.request({
+      method: "eth_sendTransaction",
+      params: [{
+        from:  walletAddr,
+        to:    BCC_CONTRACT,           // unclaim is on Comrade404
+        data:  data,
+        value: "0x" + feeWei.toString(16),
+      }],
+    });
+    status.className = "status ok";
+    status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
+    let receipt = null;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const r = await fetch(rpcUrl(CHAIN), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc:"2.0", method:"eth_getTransactionReceipt", params:[txHash], id:1 }),
+      });
+      const j = await r.json();
+      if (j.result) { receipt = j.result; break; }
+    }
+    if (!receipt) {
+      status.textContent = "Submitted but receipt not yet visible. Check your wallet.";
+      return;
+    }
+    if (receipt.status === "0x1") {
+      status.textContent = "Unclaimed. Your BCC is back, the ERC-721 is burned, a fresh 404 NFT (same seed) appears in Mine.";
+      claimedState = { total: 0, loaded: 0, busy: false };
+      $("unclaim-btn").style.display = "none";
+    } else {
+      status.className = "status err";
+      status.textContent = "Transaction reverted on-chain.";
+    }
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = e?.message?.slice(0,140) || String(e);
+  } finally {
+    $("unclaim-btn").disabled = false;
   }
 };
 
