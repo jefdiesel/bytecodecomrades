@@ -6,9 +6,8 @@
 //   body: { jsonrpc: "2.0", method: "eth_call", params: [...], id: 1 }
 
 const ALLOWED_CHAINS = new Set([
-  "eth-mainnet", "eth-sepolia",
-  "base-mainnet", "base-sepolia",
-  "arb-mainnet", "opt-mainnet", "polygon-mainnet",
+  "eth-mainnet",
+  "eth-sepolia",
 ]);
 
 // Allow only safe read methods. Block anything that could send a transaction.

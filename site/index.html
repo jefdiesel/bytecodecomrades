@@ -214,21 +214,17 @@
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-const CONTRACT_KEY = "contract_addr";
-const CHAIN_KEY    = "chain";
+const CONTRACT_KEY = "contract_addr_v2";
+const CHAIN_KEY    = "chain_v2";
 
-// Default contract address — can be overridden by user. Sepolia BCC deploy.
+// Hardwired contract — currently the Sepolia testnet deploy.
+// Update to mainnet address once deployed.
 const DEFAULT_CONTRACT = "0xb215f556b0f2e3f62105a4309bb35b2258bed13a";
 const DEFAULT_CHAIN    = "eth-sepolia";
 
 const CHAINS = [
   ["eth-mainnet",   "Ethereum Mainnet"],
-  ["base-mainnet",  "Base"],
-  ["arb-mainnet",   "Arbitrum"],
-  ["opt-mainnet",   "Optimism"],
-  ["polygon-mainnet","Polygon"],
-  ["eth-sepolia",   "Sepolia"],
-  ["base-sepolia",  "Base Sepolia"],
+  ["eth-sepolia",   "Sepolia (testnet)"],
 ];
 
 // Function selectors
