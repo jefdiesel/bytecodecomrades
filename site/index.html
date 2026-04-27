@@ -92,6 +92,32 @@
   .pager button { width: auto; padding: 6px 12px; }
   .pager .info { color: var(--muted); font-size: 12px; flex: 1; }
   .progress { color: var(--muted); font-size: 11px; margin: 8px 0; }
+
+  /* Detail modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto; z-index: 1000;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    width: 100%; max-width: 720px; padding: 24px; position: relative;
+  }
+  .modal-close {
+    position: absolute; top: 12px; right: 12px; width: 36px; height: 36px;
+    background: #000; color: var(--accent); border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer; font-size: 18px; line-height: 1; padding: 0;
+    text-transform: none; letter-spacing: 0; margin: 0; font-weight: 600;
+  }
+  .modal-close:hover { border-color: var(--accent); }
+  .modal-canvas {
+    background: #000; border: 1px solid var(--border); border-radius: 6px;
+    aspect-ratio: 1; max-width: 480px; margin: 0 auto 16px;
+    image-rendering: pixelated; overflow: hidden;
+  }
+  .modal-canvas img, .modal-canvas svg { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .modal-name { font-size: 18px; color: var(--accent); margin-bottom: 12px; text-align: center; }
 </style>
 </head>
 <body>
@@ -101,8 +127,7 @@
 <p class="sub">On-chain art. Procedurally generated. Born from Uniswap v4 swaps.</p>
 
 <div class="tabs">
-  <button class="tab active" data-tab="browse">Floor</button>
-  <button class="tab" data-tab="claimed">Claimed</button>
+  <button class="tab active" data-tab="browse">Browse All</button>
   <button class="tab" data-tab="genesis">Genesis</button>
   <button class="tab" data-tab="single">Lookup</button>
   <button class="tab" data-tab="wallet">By Wallet</button>
@@ -189,12 +214,11 @@
   </div>
 </div>
 
-<!-- ============ FLOOR (404, ephemeral) ============ -->
+<!-- ============ BROWSE ALL ============ -->
 <div class="panel active" id="panel-browse">
   <div>
     <fieldset>
-      <legend>Floor (Live 404)</legend>
-      <p class="sub" style="margin:0 0 12px;">Every whole COMRADE token in a wallet is one Comrade NFT, joined at the hip. Numbers here are mint-event counters, not collector IDs — sell your token, your Comrade is gone forever; buy back, you get a brand-new one with new art. To make a Comrade <em>permanent</em> with a real serial number, <strong>claim</strong> it (see Claimed tab).</p>
+      <legend>Browse Collection</legend>
       <label>Chain</label>
       <select class="chain"></select>
       <label>Contract address</label>
@@ -205,7 +229,7 @@
         <option value="48" selected>48 per page</option>
         <option value="96">96 per page</option>
       </select>
-      <button id="go-browse">Load Floor</button>
+      <button id="go-browse">Load Collection</button>
     </fieldset>
   </div>
   <div>
@@ -217,37 +241,6 @@
       <span class="info" id="page-info"></span>
     </div>
     <div id="status-browse"></div>
-  </div>
-</div>
-
-<!-- ============ CLAIMED (Rare ERC-721, persistent) ============ -->
-<div class="panel" id="panel-claimed">
-  <div>
-    <fieldset>
-      <legend>Claimed Comrades</legend>
-      <p class="sub" style="margin:0 0 12px;">Comrades that holders have lifted out into a permanent ERC-721. <strong>These are the only ones with real serial numbers.</strong> #0001 stays #0001 forever, tradeable on any NFT marketplace.</p>
-      <label>Chain</label>
-      <select class="chain"></select>
-      <label>Rare contract address</label>
-      <input id="claimed-addr" placeholder="0x... (Rare contract)" spellcheck="false">
-      <label>Page size</label>
-      <select id="claimed-page-size">
-        <option value="24">24 per page</option>
-        <option value="48" selected>48 per page</option>
-        <option value="96">96 per page</option>
-      </select>
-      <button id="go-claimed">Load Claimed</button>
-    </fieldset>
-  </div>
-  <div>
-    <div id="claimed-progress" class="progress"></div>
-    <div class="grid" id="claimed-grid"></div>
-    <div class="pager" id="claimed-pager" style="display:none;">
-      <button class="ghost" id="claimed-prev">Prev</button>
-      <button class="ghost" id="claimed-next">Next</button>
-      <span class="info" id="claimed-info"></span>
-    </div>
-    <div id="status-claimed"></div>
   </div>
 </div>
 
@@ -269,6 +262,16 @@
   <div></div>
 </div>
 
+</div>
+
+<!-- ============ DETAIL MODAL ============ -->
+<div class="modal-overlay" id="detail-modal">
+  <div class="modal">
+    <button class="modal-close" id="detail-close" aria-label="close">×</button>
+    <div class="modal-name" id="detail-name"></div>
+    <div class="modal-canvas" id="detail-canvas"></div>
+    <div class="traits" id="detail-traits"></div>
+  </div>
 </div>
 
 <script>
@@ -516,7 +519,7 @@ $("go-wallet").onclick = async () => {
       done++; $("wallet-progress").textContent = `Loaded ${done}/${ids.length}...`;
       return parseTokenURI(decodeString(r));
     });
-    renderGrid("wallet-grid", ids, metas, chain, addr, { showId: false });
+    renderGrid("wallet-grid", ids, metas, chain, addr);
     $("wallet-progress").textContent = `${ids.length} Comrades held by ${shorten(w)}.`;
   } catch (e) {
     setStatus("wallet", "err", e.message || String(e));
@@ -571,8 +574,8 @@ async function loadBrowsePage() {
     done++; $("browse-progress").textContent = `Loaded ${done}/${slice.length}...`;
     return parseTokenURI(decodeString(r));
   });
-  renderGrid("browse-grid", slice, metas, chain, contract, { showId: false });
-  $("browse-progress").textContent = `${ids.length} ephemeral Comrades on the floor.`;
+  renderGrid("browse-grid", slice, metas, chain, contract);
+  $("browse-progress").textContent = `${ids.length} total Comrades.`;
   $("browse-pager").style.display = "";
   const totalPages = Math.ceil(ids.length / size);
   $("page-info").textContent = `Page ${page+1} / ${totalPages}`;
@@ -580,73 +583,9 @@ async function loadBrowsePage() {
   $("page-next").disabled = page >= totalPages - 1;
 }
 
-// =============== CLAIMED (Rare ERC-721) ===============
-const SEL_NEXT_RARE_ID = "61b8ce8c"; // nextId() on ComradeRare
-let claimedState = { ids: [], page: 0, size: 48, chain: "", contract: "" };
-
-$("go-claimed").onclick = async () => {
-  $("status-claimed").textContent = "";
-  $("claimed-grid").innerHTML = "";
-  $("claimed-progress").textContent = "";
-  $("claimed-pager").style.display = "none";
-  $("go-claimed").disabled = true;
-  try {
-    const chain = $$("select.chain")[$$("select.chain").length - 1].value;
-    const addr  = $("claimed-addr").value.trim();
-    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error("Bad Rare contract address. (None deployed yet — paste it here when claiming goes live.)");
-    $("claimed-progress").textContent = "Reading collection size...";
-    const r = await ethCall(chain, addr, "0x" + SEL_NEXT_RARE_ID);
-    const total = Number(decodeUint256(r));
-    if (total === 0) {
-      $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first.";
-      return;
-    }
-    claimedState = {
-      ids: Array.from({length: total}, (_, i) => BigInt(i)),
-      page: 0,
-      size: parseInt($("claimed-page-size").value),
-      chain, contract: addr,
-    };
-    await loadClaimedPage();
-  } catch (e) {
-    setStatus("claimed", "err", e.message || String(e));
-  } finally { $("go-claimed").disabled = false; }
-};
-
-$("claimed-prev").onclick = () => { if (claimedState.page > 0) { claimedState.page--; loadClaimedPage(); }};
-$("claimed-next").onclick = () => {
-  const max = Math.ceil(claimedState.ids.length / claimedState.size) - 1;
-  if (claimedState.page < max) { claimedState.page++; loadClaimedPage(); }
-};
-
-async function loadClaimedPage() {
-  const { ids, page, size, chain, contract } = claimedState;
-  const start = page * size;
-  const slice = ids.slice(start, start + size);
-  $("claimed-grid").innerHTML = "";
-  $("claimed-progress").textContent = `Loading ${slice.length} of ${ids.length}...`;
-  const conc = parseInt(localStorage.getItem("concurrency") || "12");
-  let done = 0;
-  const metas = await pmap(slice, conc, async (id) => {
-    const r = await ethCall(chain, contract, "0x" + SEL_TOKEN_URI + encU256(id));
-    done++; $("claimed-progress").textContent = `Loaded ${done}/${slice.length}...`;
-    return parseTokenURI(decodeString(r));
-  });
-  renderGrid("claimed-grid", slice, metas, chain, contract, { showId: true });
-  $("claimed-progress").textContent = `${ids.length} permanent Comrades claimed.`;
-  $("claimed-pager").style.display = "";
-  const totalPages = Math.ceil(ids.length / size);
-  $("claimed-info").textContent = `Page ${page+1} / ${totalPages}`;
-  $("claimed-prev").disabled = page === 0;
-  $("claimed-next").disabled = page >= totalPages - 1;
-}
-
 function renderGrid(elId, ids, metas, chain, contract, opts) {
-  // opts.showId: if true, label cells with "#N" (Claimed/persistent collections).
-  // If false/undefined, omit the label (Floor/404 — IDs are ephemeral).
   const grid = $(elId);
   grid.innerHTML = "";
-  const showId = !!(opts && opts.showId);
   ids.forEach((id, i) => {
     const meta = metas[i];
     const cell = document.createElement("div");
@@ -656,22 +595,35 @@ function renderGrid(elId, ids, metas, chain, contract, opts) {
     if (meta && !meta.__error && meta.image) renderImage(wrap, meta.image);
     else wrap.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;">err</div>';
     cell.appendChild(wrap);
-    if (showId) {
-      const lbl = document.createElement("div");
-      lbl.className = "lbl";
-      lbl.textContent = "#" + id.toString().padStart(4, "0");
-      cell.appendChild(lbl);
-    }
-    cell.onclick = () => {
-      document.querySelector('.tab[data-tab="single"]').click();
-      const addrInputs = $$("input.addr");
-      if (contract && addrInputs[0]) addrInputs[0].value = contract;
-      $("single-id").value = id.toString();
-      $("go-single").click();
-    };
+    const lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = "#" + id.toString();
+    cell.appendChild(lbl);
+    cell.onclick = () => openDetail(id, meta);
     grid.appendChild(cell);
   });
 }
+
+// =============== DETAIL MODAL ===============
+function openDetail(id, meta) {
+  $("detail-name").textContent = (meta && meta.name) || ("Comrade #" + id.toString());
+  const canvas = $("detail-canvas");
+  if (meta && !meta.__error && meta.image) renderImage(canvas, meta.image);
+  else canvas.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">no image</div>';
+  const traits = $("detail-traits");
+  traits.innerHTML = "";
+  for (const a of (meta && meta.attributes) || []) {
+    const el = document.createElement("div");
+    el.className = "trait";
+    el.innerHTML = `<div class="k">${esc(a.trait_type)}</div><div class="v">${esc(a.value)}</div>`;
+    traits.appendChild(el);
+  }
+  $("detail-modal").classList.add("open");
+}
+function closeDetail() { $("detail-modal").classList.remove("open"); }
+$("detail-close").onclick = closeDetail;
+$("detail-modal").onclick = (e) => { if (e.target === $("detail-modal")) closeDetail(); };
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
 
 function shorten(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
