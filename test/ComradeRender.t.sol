@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test, console2}    from "forge-std/Test.sol";
-import {ComradeSpriteData} from "../src/ComradeSpriteData.sol";
-import {ComradeRenderer}   from "../src/ComradeRenderer.sol";
-import {ComradeTaxonomy}   from "../src/ComradeTaxonomy.sol";
+import {Test, console2}      from "forge-std/Test.sol";
+import {ComradeSpriteData}   from "../src/ComradeSpriteData.sol";
+import {ComradeSpriteChunk0} from "../src/ComradeSpriteChunk0.sol";
+import {ComradeSpriteChunk1} from "../src/ComradeSpriteChunk1.sol";
+import {ComradeSpriteChunk2} from "../src/ComradeSpriteChunk2.sol";
+import {ComradeSpriteChunk3} from "../src/ComradeSpriteChunk3.sol";
+import {ComradeSpriteChunk4} from "../src/ComradeSpriteChunk4.sol";
+import {ComradeRenderer}     from "../src/ComradeRenderer.sol";
+import {ComradeTaxonomy}     from "../src/ComradeTaxonomy.sol";
 
 contract ComradeRenderTest is Test {
     ComradeSpriteData spriteData;
@@ -12,7 +17,14 @@ contract ComradeRenderTest is Test {
     ComradeRenderer   renderer;
 
     function setUp() public {
-        spriteData = new ComradeSpriteData();
+        address[5] memory chunks = [
+            address(new ComradeSpriteChunk0()),
+            address(new ComradeSpriteChunk1()),
+            address(new ComradeSpriteChunk2()),
+            address(new ComradeSpriteChunk3()),
+            address(new ComradeSpriteChunk4())
+        ];
+        spriteData = new ComradeSpriteData(chunks);
         taxonomy   = new ComradeTaxonomy();
         renderer   = new ComradeRenderer(spriteData, taxonomy);
     }
@@ -49,7 +61,7 @@ contract ComradeRenderTest is Test {
         // Sanity: SVG should be non-trivial
         assertTrue(bytes(svg).length > 1000, "non-trivial SVG output");
         // Check for expected content
-        assertTrue(_contains(svg, 'viewBox="0 0 32 32"'), "32x32 viewBox");
+        assertTrue(_contains(svg, "viewBox='0 0 32 32'"), "32x32 viewBox");
     }
 
     function test_picker_returns_required_categories() public view {
@@ -102,8 +114,8 @@ contract ComradeRenderTest is Test {
         ids[1] = 22;  // Alien People
 
         string memory svg = renderer.renderSVG(ids, true, "c3ff00");
-        assertTrue(_contains(svg, '#c3ff00'),                            "bg present");
-        assertTrue(_contains(svg, 'translate(32 0) scale(-1 1)'),        "flip transform");
+        assertTrue(_contains(svg, "#c3ff00"),                            "bg present");
+        assertTrue(_contains(svg, "translate(32 0) scale(-1 1)"),        "flip transform");
     }
 
     function _contains(string memory haystack, string memory needle) internal pure returns (bool) {

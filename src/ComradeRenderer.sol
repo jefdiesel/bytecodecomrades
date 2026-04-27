@@ -168,12 +168,14 @@ contract ComradeRenderer {
     function _toSvg(bytes memory pixels, bool flipHorizontal, string memory bgHex)
         internal pure returns (string memory)
     {
+        // NOTE: SVG uses SINGLE quotes throughout so it can be safely embedded
+        // in a double-quoted JSON string field without escaping.
         string memory header = string.concat(
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges" width="320" height="320">',
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' shape-rendering='crispEdges' width='320' height='320'>",
             bytes(bgHex).length > 0
-                ? string.concat('<rect width="32" height="32" fill="#', bgHex, '"/>')
+                ? string.concat("<rect width='32' height='32' fill='#", bgHex, "'/>")
                 : "",
-            flipHorizontal ? '<g transform="translate(32 0) scale(-1 1)">' : ""
+            flipHorizontal ? "<g transform='translate(32 0) scale(-1 1)'>" : ""
         );
 
         // Row-level RLE: walk each row, coalesce consecutive same-color
@@ -197,10 +199,10 @@ contract ComradeRenderer {
                 }
                 body = string.concat(
                     body,
-                    '<rect x="', _u(x), '" y="', _u(y),
-                    '" width="', _u(w), '" height="1" fill="#',
+                    "<rect x='", _u(x), "' y='", _u(y),
+                    "' width='", _u(w), "' height='1' fill='#",
                     _hex2(uint8(r)), _hex2(uint8(g)), _hex2(uint8(b)),
-                    '"/>'
+                    "'/>"
                 );
                 x += w;
             }
