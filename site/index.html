@@ -223,11 +223,11 @@
       <select class="chain"></select>
       <label>Contract address</label>
       <input class="addr" placeholder="0x..." spellcheck="false">
-      <label>Page size</label>
+      <label>Batch size (per scroll)</label>
       <select id="browse-page-size">
-        <option value="24">24 per page</option>
-        <option value="48" selected>48 per page</option>
-        <option value="96">96 per page</option>
+        <option value="24" selected>24 per scroll</option>
+        <option value="48">48 per scroll</option>
+        <option value="96">96 per scroll</option>
       </select>
       <button id="go-browse">Load Collection</button>
     </fieldset>
@@ -235,11 +235,7 @@
   <div>
     <div id="browse-progress" class="progress"></div>
     <div class="grid" id="browse-grid"></div>
-    <div class="pager" id="browse-pager" style="display:none;">
-      <button class="ghost" id="page-prev">Prev</button>
-      <button class="ghost" id="page-next">Next</button>
-      <span class="info" id="page-info"></span>
-    </div>
+    <div id="browse-sentinel" style="height:40px;"></div>
     <div id="status-browse"></div>
   </div>
 </div>
@@ -526,15 +522,16 @@ $("go-wallet").onclick = async () => {
   } finally { $("go-wallet").disabled = false; }
 };
 
-// =============== BROWSE ALL ===============
-let browseState = { ids: [], page: 0, size: 48, chain: "", contract: "" };
+// =============== BROWSE ALL (infinite scroll) ===============
+let browseState = { total: 0, loaded: 0, batch: 24, chain: "", contract: "", busy: false };
+let browseObserver = null;
 
 $("go-browse").onclick = async () => {
   $("status-browse").textContent = "";
   $("browse-grid").innerHTML = "";
   $("browse-progress").textContent = "";
-  $("browse-pager").style.display = "none";
   $("go-browse").disabled = true;
+  if (browseObserver) { browseObserver.disconnect(); browseObserver = null; }
   try {
     const chain = $$("select.chain")[2].value;
     const addr  = $$("input.addr")[2].value.trim();
@@ -544,43 +541,61 @@ $("go-browse").onclick = async () => {
     const total = Number(decodeUint256(r));
     if (total === 0) { $("browse-progress").textContent = "Collection is empty."; return; }
     browseState = {
-      ids: Array.from({length: total}, (_, i) => BigInt(i)),
-      page: 0,
-      size: parseInt($("browse-page-size").value),
-      chain, contract: addr,
+      total, loaded: 0,
+      batch: parseInt($("browse-page-size").value),
+      chain, contract: addr, busy: false,
     };
-    await loadBrowsePage();
+    await loadMoreBrowse();
+    // Wire infinite scroll: when sentinel enters viewport, load next batch.
+    browseObserver = new IntersectionObserver(async (entries) => {
+      if (entries[0].isIntersecting) await loadMoreBrowse();
+    }, { rootMargin: "400px" });
+    browseObserver.observe($("browse-sentinel"));
   } catch (e) {
     setStatus("browse", "err", e.message || String(e));
   } finally { $("go-browse").disabled = false; }
 };
 
-$("page-prev").onclick = () => { if (browseState.page > 0) { browseState.page--; loadBrowsePage(); }};
-$("page-next").onclick = () => {
-  const max = Math.ceil(browseState.ids.length / browseState.size) - 1;
-  if (browseState.page < max) { browseState.page++; loadBrowsePage(); }
-};
-
-async function loadBrowsePage() {
-  const { ids, page, size, chain, contract } = browseState;
-  const start = page * size;
-  const slice = ids.slice(start, start + size);
-  $("browse-grid").innerHTML = "";
-  $("browse-progress").textContent = `Loading ${slice.length} of ${ids.length}...`;
+async function loadMoreBrowse() {
+  if (browseState.busy) return;
+  if (browseState.loaded >= browseState.total) {
+    $("browse-progress").textContent = `${browseState.total} Comrades. End of collection.`;
+    if (browseObserver) browseObserver.disconnect();
+    return;
+  }
+  browseState.busy = true;
+  const { total, loaded, batch, chain, contract } = browseState;
+  const start = loaded;
+  const end = Math.min(loaded + batch, total);
+  const slice = [];
+  for (let i = start; i < end; i++) slice.push(BigInt(i));
+  $("browse-progress").textContent = `Loaded ${loaded}/${total}, fetching ${slice.length} more...`;
   const conc = parseInt(localStorage.getItem("concurrency") || "12");
-  let done = 0;
   const metas = await pmap(slice, conc, async (id) => {
     const r = await ethCall(chain, contract, "0x" + SEL_TOKEN_URI + encU256(id));
-    done++; $("browse-progress").textContent = `Loaded ${done}/${slice.length}...`;
     return parseTokenURI(decodeString(r));
   });
-  renderGrid("browse-grid", slice, metas, chain, contract);
-  $("browse-progress").textContent = `${ids.length} total Comrades.`;
-  $("browse-pager").style.display = "";
-  const totalPages = Math.ceil(ids.length / size);
-  $("page-info").textContent = `Page ${page+1} / ${totalPages}`;
-  $("page-prev").disabled = page === 0;
-  $("page-next").disabled = page >= totalPages - 1;
+  appendToGrid("browse-grid", slice, metas, chain, contract);
+  browseState.loaded = end;
+  browseState.busy = false;
+  $("browse-progress").textContent = `${browseState.loaded} of ${total} loaded${browseState.loaded < total ? " — scroll for more" : ". End of collection."}`;
+  if (browseState.loaded >= total && browseObserver) browseObserver.disconnect();
+}
+
+function appendToGrid(elId, ids, metas, chain, contract) {
+  const grid = $(elId);
+  ids.forEach((id, i) => {
+    const meta = metas[i];
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    const wrap = document.createElement("div");
+    wrap.className = "img-wrap";
+    if (meta && !meta.__error && meta.image) renderImage(wrap, meta.image);
+    else wrap.innerHTML = '<div class="placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;">err</div>';
+    cell.appendChild(wrap);
+    cell.onclick = () => openDetail(id, meta);
+    grid.appendChild(cell);
+  });
 }
 
 function renderGrid(elId, ids, metas, chain, contract, opts) {
