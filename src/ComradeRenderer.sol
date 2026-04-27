@@ -141,10 +141,13 @@ contract ComradeRenderer {
 
     // -------- internals --------
 
-    /// @dev Walk RLE-encoded sprite, write into the pixel buffer at the right position.
-    /// Each run is 3 bytes: (count: u8, paletteIdx: u16 BE).
+    /// @dev Walk RLE-encoded sprite, alpha-blend into the pixel buffer at the
+    /// right position. Each run is 3 bytes: (count: u8, paletteIdx: u16 BE).
+    /// Uses Porter-Duff "over" so semi-transparent palette pixels (lasers, lens
+    /// tints, glows) blend with whatever has already been drawn underneath
+    /// instead of overwriting it.
     function _composite(bytes memory pixels, bytes memory palette, bytes memory sprite_) internal pure {
-        uint256 pos = 0; // pixel index 0..1023
+        uint256 pos = 0;
         uint256 i = 0;
         uint256 spriteLen = sprite_.length;
         while (i < spriteLen) {
@@ -152,24 +155,60 @@ contract ComradeRenderer {
             uint256 idx = (uint256(uint8(sprite_[i + 1])) << 8) | uint256(uint8(sprite_[i + 2]));
             i += 3;
             if (idx == 0) {
-                // transparent — skip these pixels (existing buffer content survives)
                 pos += count;
                 continue;
             }
             uint256 colorOff = idx * 4;
-            bytes1 r = palette[colorOff];
-            bytes1 g = palette[colorOff + 1];
-            bytes1 b = palette[colorOff + 2];
-            bytes1 a = palette[colorOff + 3];
             for (uint256 k = 0; k < count; k++) {
-                uint256 p = (pos + k) * 4;
-                pixels[p]     = r;
-                pixels[p + 1] = g;
-                pixels[p + 2] = b;
-                pixels[p + 3] = a;
+                _blendOne(pixels, (pos + k) * 4, palette, colorOff);
             }
             pos += count;
         }
+    }
+
+    /// @dev Porter-Duff "over": src is the palette pixel at `srcOff` (4 bytes:
+    /// R,G,B,A), dst is `pixels[pixelOff..pixelOff+4]`. Writes the blended RGBA
+    /// back to dst.
+    function _blendOne(
+        bytes memory pixels, uint256 pixelOff,
+        bytes memory palette, uint256 srcOff
+    ) private pure {
+        uint256 sa = uint8(palette[srcOff + 3]);
+        if (sa == 255) {
+            pixels[pixelOff]     = palette[srcOff];
+            pixels[pixelOff + 1] = palette[srcOff + 1];
+            pixels[pixelOff + 2] = palette[srcOff + 2];
+            pixels[pixelOff + 3] = bytes1(uint8(255));
+            return;
+        }
+        uint256 da = uint8(pixels[pixelOff + 3]);
+        if (da == 0) {
+            pixels[pixelOff]     = palette[srcOff];
+            pixels[pixelOff + 1] = palette[srcOff + 1];
+            pixels[pixelOff + 2] = palette[srcOff + 2];
+            pixels[pixelOff + 3] = palette[srcOff + 3];
+            return;
+        }
+        // out_a = sa + da*(255 - sa)/255
+        uint256 oneMinusSa = 255 - sa;
+        uint256 oa = sa + (da * oneMinusSa) / 255;
+        if (oa == 0) {
+            pixels[pixelOff + 3] = 0;
+            return;
+        }
+        // For each channel: out = (src*sa + dst*da*(255-sa)/255) / oa
+        pixels[pixelOff]     = bytes1(uint8(_blendChan(uint8(palette[srcOff]),     uint8(pixels[pixelOff]),     sa, da, oneMinusSa, oa)));
+        pixels[pixelOff + 1] = bytes1(uint8(_blendChan(uint8(palette[srcOff + 1]), uint8(pixels[pixelOff + 1]), sa, da, oneMinusSa, oa)));
+        pixels[pixelOff + 2] = bytes1(uint8(_blendChan(uint8(palette[srcOff + 2]), uint8(pixels[pixelOff + 2]), sa, da, oneMinusSa, oa)));
+        pixels[pixelOff + 3] = bytes1(uint8(oa));
+    }
+
+    function _blendChan(uint256 s, uint256 d, uint256 sa, uint256 da, uint256 oneMinusSa, uint256 oa)
+        private pure returns (uint256)
+    {
+        uint256 num = s * sa * 255 + d * da * oneMinusSa;
+        uint256 v = num / (oa * 255);
+        return v > 255 ? 255 : v;
     }
 
     function _toSvg(bytes memory pixels, bool flipHorizontal, string memory bgHex)
