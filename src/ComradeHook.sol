@@ -81,7 +81,7 @@ contract ComradeHook is IHooks, ISeedSource {
 
     function afterSwap(
         address,
-        PoolKey calldata,
+        PoolKey calldata key,
         IPoolManager.SwapParams calldata params,
         BalanceDelta delta,
         bytes calldata
@@ -105,9 +105,18 @@ contract ComradeHook is IHooks, ISeedSource {
         }
         uint128 absOut = unspecifiedDelta < 0 ? uint128(-unspecifiedDelta) : uint128(unspecifiedDelta);
         uint128 fee = uint128((uint256(absOut) * uint256(feeBps)) / 10_000);
+        if (fee == 0) return (IHooks.afterSwap.selector, int128(0));
 
-        // Returning a positive delta means "the hook took this much from the swap output".
-        // PoolManager will charge the swapper accordingly.
+        // Pre-emptively mint a 6909 claim for the fee in the unspecified currency.
+        // This produces a -fee delta on the hook NOW, and the +fee delta returned
+        // below cancels it — net zero, no CurrencyNotSettled at unlock close.
+        // The hook owner sweeps via withdrawFees(), which burns the claim and
+        // takes real tokens out.
+        Currency feeCurrency = params.zeroForOne
+            ? (params.amountSpecified < 0 ? key.currency1 : key.currency0)
+            : (params.amountSpecified < 0 ? key.currency0 : key.currency1);
+        poolManager.mint(address(this), feeCurrency.toId(), fee);
+
         return (IHooks.afterSwap.selector, int128(fee));
     }
 
