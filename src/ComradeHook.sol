@@ -18,6 +18,9 @@ import {ISeedSource} from "./ISeedSource.sol";
 /// REQUIRED ADDRESS BITS: afterSwap (1<<6) + afterSwapReturnsDelta (1<<2) = 0x44.
 /// Mine via HookMiner before deploy (CREATE2 salt).
 contract ComradeHook is IHooks, ISeedSource {
+    /// @dev Bumped each redeploy to force fresh CREATE2 bytecode → fresh address.
+    uint256 public constant DEPLOY_REVISION = 2;
+
     IPoolManager public immutable poolManager;
 
     bytes32 public override currentSeed;

@@ -19,8 +19,10 @@ import {ComradeBloomChunk1}    from "../src/ComradeBloomChunk1.sol";
 import {ComradeTaxonomy}       from "../src/ComradeTaxonomy.sol";
 import {ComradeRenderer}       from "../src/ComradeRenderer.sol";
 import {ComradeGenesis}        from "../src/ComradeGenesis.sol";
+import {ComradeClaimed}        from "../src/ComradeClaimed.sol";
 import {IComradeRenderer}      from "../src/IComradeRenderer.sol";
 import {IComradeBloom}         from "../src/IComradeBloom.sol";
+import {IComradeClaimed}       from "../src/IComradeClaimed.sol";
 
 /// @notice Full-stack deploy for the Comrade launch.
 ///
@@ -108,6 +110,10 @@ contract DeployComrade is Script {
         token.setClaimFee(0.001111 ether);    // ~$3.50 — wrap into a tradeable ERC-721
         token.setUnclaimFee(0.0069 ether);    // ~$22 — discourages tight wrap/unwrap loops
 
+        // ComradeClaimed: standalone ERC-721 minted on claim()
+        ComradeClaimed claimedNft = new ComradeClaimed(address(token), IComradeRenderer(address(renderer)));
+        token.setClaimedNft(IComradeClaimed(address(claimedNft)));
+
         // Genesis: airdrop to CDC #1 owner
         ComradeGenesis genesis = new ComradeGenesis(cdcOg, renderer);
 
@@ -121,6 +127,7 @@ contract DeployComrade is Script {
         console2.log("ComradeBloom:      ", address(bloom));
         console2.log("ComradeHook:       ", address(hook));
         console2.log("Comrade404:        ", address(token));
+        console2.log("ComradeClaimed:    ", address(claimedNft));
         console2.log("ComradeGenesis:    ", address(genesis));
         console2.log("");
         console2.log("Genesis Comrade #0 minted to:", cdcOg);
