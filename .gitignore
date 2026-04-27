@@ -35,3 +35,4 @@ samples/viewer.local.*
 # Python caches
 __pycache__/
 *.pyc
+.gstack/

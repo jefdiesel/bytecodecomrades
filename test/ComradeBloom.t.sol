@@ -2,13 +2,18 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ComradeBloom} from "../src/ComradeBloom.sol";
+import {ComradeBloom}       from "../src/ComradeBloom.sol";
+import {ComradeBloomChunk0} from "../src/ComradeBloomChunk0.sol";
+import {ComradeBloomChunk1} from "../src/ComradeBloomChunk1.sol";
 
 contract ComradeBloomTest is Test {
     ComradeBloom bloom;
 
     function setUp() public {
-        bloom = new ComradeBloom();
+        bloom = new ComradeBloom(
+            address(new ComradeBloomChunk0()),
+            address(new ComradeBloomChunk1())
+        );
     }
 
     function test_constants() public view {

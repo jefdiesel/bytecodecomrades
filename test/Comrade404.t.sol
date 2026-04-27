@@ -2,10 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {Test, console2}    from "forge-std/Test.sol";
-import {Comrade404}        from "../src/Comrade404.sol";
-import {ComradeRenderer}   from "../src/ComradeRenderer.sol";
-import {ComradeSpriteData} from "../src/ComradeSpriteData.sol";
-import {ComradeTaxonomy}   from "../src/ComradeTaxonomy.sol";
+import {Comrade404}          from "../src/Comrade404.sol";
+import {ComradeRenderer}     from "../src/ComradeRenderer.sol";
+import {ComradeSpriteData}   from "../src/ComradeSpriteData.sol";
+import {ComradeSpriteChunk0} from "../src/ComradeSpriteChunk0.sol";
+import {ComradeSpriteChunk1} from "../src/ComradeSpriteChunk1.sol";
+import {ComradeSpriteChunk2} from "../src/ComradeSpriteChunk2.sol";
+import {ComradeSpriteChunk3} from "../src/ComradeSpriteChunk3.sol";
+import {ComradeSpriteChunk4} from "../src/ComradeSpriteChunk4.sol";
+import {ComradeTaxonomy}     from "../src/ComradeTaxonomy.sol";
 import {ISeedSource}       from "../src/ISeedSource.sol";
 import {IComradeRenderer}  from "../src/IComradeRenderer.sol";
 
@@ -27,7 +32,14 @@ contract Comrade404Test is Test {
 
     function setUp() public {
         seedSrc    = new MockSeed();
-        spriteData = new ComradeSpriteData();
+        address[5] memory chunks = [
+            address(new ComradeSpriteChunk0()),
+            address(new ComradeSpriteChunk1()),
+            address(new ComradeSpriteChunk2()),
+            address(new ComradeSpriteChunk3()),
+            address(new ComradeSpriteChunk4())
+        ];
+        spriteData = new ComradeSpriteData(chunks);
         taxonomy   = new ComradeTaxonomy();
         renderer   = new ComradeRenderer(spriteData, taxonomy);
         // 32 max comrades, 1 token each (simple ratio for tests)

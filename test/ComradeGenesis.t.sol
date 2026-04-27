@@ -2,10 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {Test, console2}    from "forge-std/Test.sol";
-import {ComradeSpriteData} from "../src/ComradeSpriteData.sol";
-import {ComradeRenderer}   from "../src/ComradeRenderer.sol";
-import {ComradeTaxonomy}   from "../src/ComradeTaxonomy.sol";
-import {ComradeGenesis}    from "../src/ComradeGenesis.sol";
+import {ComradeSpriteData}   from "../src/ComradeSpriteData.sol";
+import {ComradeSpriteChunk0} from "../src/ComradeSpriteChunk0.sol";
+import {ComradeSpriteChunk1} from "../src/ComradeSpriteChunk1.sol";
+import {ComradeSpriteChunk2} from "../src/ComradeSpriteChunk2.sol";
+import {ComradeSpriteChunk3} from "../src/ComradeSpriteChunk3.sol";
+import {ComradeSpriteChunk4} from "../src/ComradeSpriteChunk4.sol";
+import {ComradeRenderer}     from "../src/ComradeRenderer.sol";
+import {ComradeTaxonomy}     from "../src/ComradeTaxonomy.sol";
+import {ComradeGenesis}      from "../src/ComradeGenesis.sol";
 
 contract ComradeGenesisTest is Test {
     ComradeSpriteData spriteData;
@@ -17,7 +22,14 @@ contract ComradeGenesisTest is Test {
     address constant CDC_OG = 0xEbfD774c1C2008E56cE40E0a4504Ebecc81b1921;
 
     function setUp() public {
-        spriteData = new ComradeSpriteData();
+        address[5] memory chunks = [
+            address(new ComradeSpriteChunk0()),
+            address(new ComradeSpriteChunk1()),
+            address(new ComradeSpriteChunk2()),
+            address(new ComradeSpriteChunk3()),
+            address(new ComradeSpriteChunk4())
+        ];
+        spriteData = new ComradeSpriteData(chunks);
         taxonomy   = new ComradeTaxonomy();
         renderer   = new ComradeRenderer(spriteData, taxonomy);
         genesis    = new ComradeGenesis(CDC_OG, renderer);

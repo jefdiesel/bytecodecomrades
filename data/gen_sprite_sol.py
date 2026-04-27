@@ -153,15 +153,33 @@ contract ComradeSpriteData {{
     }}
 
     /// @notice Return the RLE-encoded bytes for sprite index `i`.
+    /// @dev The encoder may place a sprite at the tail of a chunk such that it
+    /// spills into the next chunk(s). We walk forward across chunks until we
+    /// have read `len` bytes total.
     function sprite(uint256 i) external view returns (bytes memory) {{
         uint256 b = i * 5;
         uint8 chunkIdx = uint8(spriteTable[b]);
         uint16 off = _readU16(spriteTable, b + 1);
         uint16 len = _readU16(spriteTable, b + 3);
-        bytes memory chunkData = IChunk(chunks[chunkIdx]).data();
+
         bytes memory out = new bytes(len);
-        for (uint256 k = 0; k < len; k++) {{
-            out[k] = chunkData[off + k];
+        bytes memory chunkData = IChunk(chunks[chunkIdx]).data();
+        uint256 srcOff = off;
+        uint256 dstOff = 0;
+        uint256 remaining = len;
+        while (remaining > 0) {{
+            uint256 avail = chunkData.length - srcOff;
+            uint256 n = avail < remaining ? avail : remaining;
+            for (uint256 k = 0; k < n; k++) {{
+                out[dstOff + k] = chunkData[srcOff + k];
+            }}
+            dstOff += n;
+            remaining -= n;
+            if (remaining > 0) {{
+                chunkIdx += 1;
+                chunkData = IChunk(chunks[chunkIdx]).data();
+                srcOff = 0;
+            }}
         }}
         return out;
     }}

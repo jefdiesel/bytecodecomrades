@@ -21,9 +21,11 @@ contract ComradeBloom {
     address public immutable chunk0;
     address public immutable chunk1;
 
-    constructor() {
-        chunk0 = address(new ComradeBloomChunk0());
-        chunk1 = address(new ComradeBloomChunk1());
+    /// @notice Pass in pre-deployed chunk addresses (deploy them separately first
+    /// to stay under the EIP-3860 49152-byte initcode limit).
+    constructor(address _chunk0, address _chunk1) {
+        chunk0 = _chunk0;
+        chunk1 = _chunk1;
     }
 
     /// @notice Compute the canonical fingerprint of a list of sprite ids
