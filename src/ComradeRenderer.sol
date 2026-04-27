@@ -185,22 +185,25 @@ contract ComradeRenderer {
             flipHorizontal ? "<g transform='translate(32 0) scale(-1 1)'>" : ""
         );
 
-        // Row-level RLE: walk each row, coalesce consecutive same-color
-        // opaque pixels into one wider rect. Cuts rect count for backgrounds
-        // from 1024 → 32 and avoids string.concat quadratic blowup.
+        // Row-level RLE: walk each row, coalesce consecutive pixels that share
+        // the same RGBA into one wider rect. Cuts rect count for backgrounds
+        // from 1024 → 32. Sub-255 alpha emits fill-opacity so semi-transparent
+        // pixels (lasers, lens tints, glow) render correctly instead of becoming
+        // fully opaque.
         string memory body = "";
         for (uint256 y = 0; y < 32; y++) {
             uint256 x = 0;
             while (x < 32) {
                 uint256 p = (y * 32 + x) * 4;
-                if (uint8(pixels[p + 3]) == 0) { x++; continue; }
+                uint8 a = uint8(pixels[p + 3]);
+                if (a == 0) { x++; continue; }
                 bytes1 r = pixels[p];
                 bytes1 g = pixels[p + 1];
                 bytes1 b = pixels[p + 2];
                 uint256 w = 1;
                 while (x + w < 32) {
                     uint256 q = (y * 32 + x + w) * 4;
-                    if (uint8(pixels[q + 3]) == 0) break;
+                    if (uint8(pixels[q + 3]) != a) break;
                     if (pixels[q] != r || pixels[q+1] != g || pixels[q+2] != b) break;
                     w++;
                 }
@@ -209,7 +212,7 @@ contract ComradeRenderer {
                     "<rect x='", _u(x), "' y='", _u(y),
                     "' width='", _u(w), "' height='1' fill='#",
                     _hex2(uint8(r)), _hex2(uint8(g)), _hex2(uint8(b)),
-                    "'/>"
+                    a == 255 ? "'/>" : string.concat("' fill-opacity='", _alphaFrac(a), "'/>")
                 );
                 x += w;
             }
@@ -223,6 +226,21 @@ contract ComradeRenderer {
     }
 
     bytes16 internal constant _HEX = "0123456789abcdef";
+
+    /// @dev Convert a 0-255 alpha to a 0.000-1.000 fractional string (3 decimals).
+    /// SVG accepts both `fill-opacity='0.5'` and percent forms; fraction keeps it small.
+    function _alphaFrac(uint8 a) internal pure returns (string memory) {
+        // 1000 * a / 255 — gives e.g. 128 → 502, render as "0.502"
+        uint256 v = (uint256(a) * 1000) / 255;
+        if (v >= 1000) return "1";
+        // 3-digit zero-padded fractional
+        bytes memory out = new bytes(5); // "0.xxx"
+        out[0] = "0"; out[1] = ".";
+        out[2] = bytes1(uint8(48 + (v / 100) % 10));
+        out[3] = bytes1(uint8(48 + (v / 10) % 10));
+        out[4] = bytes1(uint8(48 + v % 10));
+        return string(out);
+    }
 
     function _hex2(uint8 v) internal pure returns (string memory) {
         bytes memory b = new bytes(2);

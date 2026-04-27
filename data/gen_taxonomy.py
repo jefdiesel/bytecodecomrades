@@ -35,6 +35,43 @@ CATEGORIES = [
 ]
 REQUIRED = {"Background", "Type", "Eyes"}
 
+# CDC's trait_stats names sometimes diverge from our sprite_table filenames
+# (typos, spacing, renames). Map (cat_folder, cdc_name) → our_name so the
+# weight from CDC stats lands on the right sprite. Without this, traits like
+# "Green" / "Perky Porky Pink" had zero weight and never rolled.
+NAME_ALIAS = {
+    # Backgrounds
+    ("10_Backgrounds", "Block City during Rollback(Chainrunners)"): "Block City during Rollback (Chainrunners)",
+    ("10_Backgrounds", "Giga Green"):       "Green",
+    ("10_Backgrounds", "Perky Pork Pink"):  "Perky Porky Pink",
+    ("10_Backgrounds", "The Blocks are Fine"): "The Chain is Fine",
+    # Type
+    ("08_Type", "Human Melanin Level Goth"): "Human, Melanin Level Goth",
+    ("08_Type", "Human Melanin Level 80"):   "Human, Melanin Level 80",
+    ("08_Type", "Human Melanin Level 30"):   "Human, Melanin Level 30",
+    ("08_Type", "We the people"):            "We The People",
+    # Cloths
+    ("06_Cloths", "Block Construction Crew Exoskeleton"): "Block Construction Crew Exosceleton",
+    # Audio
+    ("04_Audio Indexer Derivations", "You Should See His.."): "You Should See His...",
+    # Mouth
+    ("03_Mouth", "For Real I Promise"):                                  "For Real, I Promise",
+    ("03_Mouth", "Ménage à neuf"):                                       "Ménage  à Neuf",
+    ("03_Mouth", "Vomit Tier 1 Call The Doctor!"):                       "Vomit, Tier 1 Call The Doctor!",
+    ("03_Mouth", "Vomit Tier 2 Call the Gender Studies Teacher!!"):      "Vomit, Tier 2 Call the Gender Studies Teacher!!",
+    ("03_Mouth", "Vomit Tier 3 CALL THE UNICORNS!!!"):                   "Vomit, Tier 3 CALL THE UNICORNS!!!",
+    ("03_Mouth", "Vomit Tier 4 CaLL tHe GoDS!!!!"):                      "Vomit, Tier 4 CaLL tHe GoDS!!!!",
+    ("03_Mouth", "Quadruple Block Speak"):                               "Quadrupel Block Speak",
+    # Eyes
+    ("02_Eyes", "Quadruple Block Vision"): "Quadrupel Block Vision",
+    # Head
+    ("05_Head", "Knights Helmet"):                  "Kinights Helmet",
+    ("05_Head", "Block Construction Forman Helmet"):"Block Construction Foreman Helmet",
+    ("05_Head", "Blockchain Maintenance Helmet"):   "Blockchain Maintanance Helmet",
+    ("05_Head", "Imaginary Scriptoadz Companion"):  "Invisible Scriptoadz Companion",
+    ("05_Head", "Bandana"):                         "Bandana Pirate",
+}
+
 
 def main():
     sprite_table = json.load(open(os.path.join(OUT_DIR, "sprite_table.json")))
@@ -77,7 +114,12 @@ def main():
         values = []
         skipped = []
         for value_name, freq in stats.items():
+            # First try exact match, then the alias map.
             sprite_id = sid_map.get((cat_folder, value_name))
+            if sprite_id is None:
+                aliased = NAME_ALIAS.get((cat_folder, value_name))
+                if aliased is not None:
+                    sprite_id = sid_map.get((cat_folder, aliased))
             if sprite_id is None:
                 skipped.append(value_name)
                 continue
