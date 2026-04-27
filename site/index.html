@@ -118,6 +118,30 @@
   }
   .modal-canvas img, .modal-canvas svg { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   .modal-name { font-size: 18px; color: var(--accent); margin-bottom: 12px; text-align: center; }
+
+  /* Wallet bar */
+  .wallet-bar {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 12px; margin-bottom: 12px; font-size: 11px; color: var(--muted);
+  }
+  .wallet-bar .addr { color: var(--accent); font-family: ui-monospace; }
+  .wallet-bar button {
+    width: auto; padding: 6px 12px; margin: 0; font-size: 11px;
+  }
+
+  /* Claim block in modal */
+  .claim-box {
+    margin-top: 16px; padding: 12px; border: 1px solid var(--border);
+    border-radius: 4px; background: #000;
+  }
+  .claim-box .row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
+  .claim-box .row .k { color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .claim-box .row .v { color: var(--fg); font-family: ui-monospace; }
+  .claim-box button { margin-top: 12px; }
+  .claim-box .note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .claim-box .status { margin-top: 8px; font-size: 11px; }
+  .claim-box .status.ok { color: var(--accent); }
+  .claim-box .status.err { color: #ff5050; }
 </style>
 </head>
 <body>
@@ -125,6 +149,11 @@
 
 <h1>BYTECODE COMRADES</h1>
 <p class="sub">On-chain art. Procedurally generated. Born from Uniswap v4 swaps.</p>
+
+<div class="wallet-bar" id="wallet-bar">
+  <span id="wallet-status">not connected</span>
+  <button id="wallet-connect">Connect</button>
+</div>
 
 <div class="tabs">
   <button class="tab active" data-tab="browse">Browse All</button>
@@ -267,6 +296,13 @@
     <div class="modal-name" id="detail-name"></div>
     <div class="modal-canvas" id="detail-canvas"></div>
     <div class="traits" id="detail-traits"></div>
+    <div class="claim-box" id="claim-box" style="display:none;">
+      <div class="row"><span class="k">Owner</span><span class="v" id="claim-owner">-</span></div>
+      <div class="row"><span class="k">Claim fee</span><span class="v" id="claim-fee">-</span></div>
+      <button id="claim-btn">Claim as permanent NFT</button>
+      <p class="note">Claiming locks <span id="claim-locks">1 BCC</span> inside the contract and lifts this Comrade into a standalone ERC-721 (BCC-RARE) you can trade on any NFT marketplace. The claim fee is paid in ETH to the treasury.</p>
+      <div class="status" id="claim-status"></div>
+    </div>
   </div>
 </div>
 
@@ -293,6 +329,18 @@ const CHAINS = [
 const SEL_TOKEN_URI    = "c87b56dd";  // tokenURI(uint256)
 const SEL_INVENTORY    = "7eaebb15";  // inventoryOf(address)
 const SEL_NEXT_ID      = "12ae2c5f";  // nextComradeId()
+const SEL_OWNER_OF     = "6352211e";  // ownerOf(uint256) / comradeOwner(uint256) via BCC's ERC721 helper
+const SEL_COMRADE_OWNER= "d6b19d60";  // comradeOwner(uint256) — internal mapping
+const SEL_CLAIM        = "379607f5";  // claim(uint256)
+const SEL_CLAIM_FEE    = "9596fd4d";  // claimFeeWei()
+const SEL_BALANCE_OF   = "70a08231";  // balanceOf(address)
+const SEL_TOKENS_PER   = "491a71cd";  // tokensPerComrade()
+
+// Chain id by name (matches RPC proxy chain param)
+const CHAIN_HEX = {
+  "eth-mainnet": "0x1",
+  "eth-sepolia": "0xaa36a7",
+};
 
 // Populate chain dropdowns + persist last-used contract
 function initInputs() {
@@ -627,7 +675,10 @@ function renderGrid(elId, ids, metas, chain, contract, opts) {
 }
 
 // =============== DETAIL MODAL ===============
-function openDetail(id, meta) {
+let currentDetailId = null;
+
+async function openDetail(id, meta) {
+  currentDetailId = id;
   // IDs aren't part of the identity — strip the "#N" suffix the renderer adds.
   const rawName = (meta && meta.name) || "Bytecode Comrade";
   $("detail-name").textContent = rawName.replace(/\s*#\d+\s*$/, "");
@@ -643,11 +694,181 @@ function openDetail(id, meta) {
     traits.appendChild(el);
   }
   $("detail-modal").classList.add("open");
+  refreshClaimBox(id).catch(e => console.warn("claim box refresh failed", e));
 }
-function closeDetail() { $("detail-modal").classList.remove("open"); }
+function closeDetail() {
+  $("detail-modal").classList.remove("open");
+  currentDetailId = null;
+  $("claim-box").style.display = "none";
+  $("claim-status").textContent = "";
+  $("claim-status").className = "status";
+}
 $("detail-close").onclick = closeDetail;
 $("detail-modal").onclick = (e) => { if (e.target === $("detail-modal")) closeDetail(); };
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
+
+// =============== WALLET / CLAIM ===============
+let walletAddr = null;
+
+function shortAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
+
+async function connectWallet() {
+  if (!window.ethereum) {
+    alert("No injected wallet found. Install MetaMask or another EIP-1193 wallet.");
+    return;
+  }
+  try {
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    walletAddr = accounts[0];
+    renderWalletBar();
+    if (currentDetailId !== null) refreshClaimBox(currentDetailId);
+    window.ethereum.on?.("accountsChanged", (accs) => {
+      walletAddr = accs[0] || null;
+      renderWalletBar();
+      if (currentDetailId !== null) refreshClaimBox(currentDetailId);
+    });
+    window.ethereum.on?.("chainChanged", () => {
+      if (currentDetailId !== null) refreshClaimBox(currentDetailId);
+    });
+  } catch (e) {
+    console.error(e);
+    setStatus("settings", "err", "wallet connection rejected");
+  }
+}
+
+function renderWalletBar() {
+  const status = $("wallet-status");
+  const btn = $("wallet-connect");
+  if (walletAddr) {
+    status.innerHTML = `connected as <span class="addr">${shortAddr(walletAddr)}</span>`;
+    btn.textContent = "Disconnect";
+  } else {
+    status.textContent = "not connected";
+    btn.textContent = "Connect";
+  }
+}
+
+$("wallet-connect").onclick = () => {
+  if (walletAddr) { walletAddr = null; renderWalletBar(); }
+  else connectWallet();
+};
+
+async function refreshClaimBox(id) {
+  const box = $("claim-box");
+  box.style.display = "none";
+  $("claim-status").textContent = "";
+  $("claim-status").className = "status";
+  if (!walletAddr) return;
+
+  const chain = $$("select.chain")[0].value;
+  const addr  = $$("input.addr")[0].value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
+
+  // Read owner + fee + tokensPerComrade + bcc balance in parallel
+  let owner, feeWei, perComrade, bccBal;
+  try {
+    [owner, feeWei, perComrade, bccBal] = await Promise.all([
+      ethCall(chain, addr, "0x" + SEL_OWNER_OF + encU256(id)).then(r => "0x" + r.slice(-40)),
+      ethCall(chain, addr, "0x" + SEL_CLAIM_FEE).then(r => decodeUint256(r)),
+      ethCall(chain, addr, "0x" + SEL_TOKENS_PER).then(r => decodeUint256(r)),
+      ethCall(chain, addr, "0x" + SEL_BALANCE_OF + encAddr(walletAddr)).then(r => decodeUint256(r)),
+    ]);
+  } catch (e) {
+    console.warn("claim box read failed:", e);
+    return;
+  }
+  $("claim-owner").textContent = shortAddr(owner);
+  $("claim-fee").textContent = formatEth(feeWei) + " ETH";
+  $("claim-locks").textContent = `${formatEth(perComrade)} BCC`;
+  box.style.display = "";
+
+  const isOwner   = owner.toLowerCase() === walletAddr.toLowerCase();
+  const enoughBcc = bccBal >= perComrade;
+  $("claim-btn").disabled = !(isOwner && enoughBcc);
+  $("claim-status").className = "status";
+  if (!isOwner) {
+    $("claim-status").textContent = "Connect the wallet that owns this Comrade to claim.";
+  } else if (!enoughBcc) {
+    $("claim-status").textContent = `Need ${formatEth(perComrade)} BCC to lock at claim — wallet only has ${formatEth(bccBal)}.`;
+  } else {
+    $("claim-status").textContent = "";
+  }
+}
+
+function formatEth(wei) {
+  const n = Number(wei) / 1e18;
+  if (n === 0) return "0";
+  if (n < 0.001) return n.toExponential(2);
+  return n.toPrecision(4).replace(/\.?0+$/, "");
+}
+
+$("claim-btn").onclick = async () => {
+  if (!walletAddr || currentDetailId === null) return;
+  const chain = $$("select.chain")[0].value;
+  const addr  = $$("input.addr")[0].value.trim();
+  const status = $("claim-status");
+  status.className = "status";
+  status.textContent = "Preparing transaction…";
+  $("claim-btn").disabled = true;
+  try {
+    // Make sure wallet is on the right chain
+    const wantChainHex = CHAIN_HEX[chain];
+    const curChainHex = await window.ethereum.request({ method: "eth_chainId" });
+    if (curChainHex !== wantChainHex) {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: wantChainHex }],
+      });
+    }
+    // Read claim fee fresh
+    const feeWei = decodeUint256(await ethCall(chain, addr, "0x" + SEL_CLAIM_FEE));
+    const data = "0x" + SEL_CLAIM + encU256(currentDetailId.toString());
+    const txHash = await window.ethereum.request({
+      method: "eth_sendTransaction",
+      params: [{
+        from:  walletAddr,
+        to:    addr,
+        data:  data,
+        value: "0x" + feeWei.toString(16),
+      }],
+    });
+    status.className = "status ok";
+    status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
+    // Poll for receipt
+    let receipt = null;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const r = await fetch(rpcUrl(chain), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc:"2.0", method:"eth_getTransactionReceipt", params:[txHash], id:1 }),
+      });
+      const j = await r.json();
+      if (j.result) { receipt = j.result; break; }
+    }
+    if (!receipt) {
+      status.textContent = "Submitted but receipt not yet visible. Check your wallet.";
+      return;
+    }
+    if (receipt.status === "0x1") {
+      status.textContent = "Claimed. The Comrade is now a permanent ERC-721 in your wallet.";
+    } else {
+      status.className = "status err";
+      status.textContent = "Transaction reverted on-chain.";
+    }
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = e?.message?.slice(0,140) || String(e);
+  } finally {
+    $("claim-btn").disabled = false;
+  }
+};
+
+// Auto-connect if user previously connected
+if (window.ethereum?.selectedAddress) {
+  walletAddr = window.ethereum.selectedAddress;
+  renderWalletBar();
+}
 
 function shorten(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
