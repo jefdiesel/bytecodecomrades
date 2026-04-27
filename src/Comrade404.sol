@@ -6,6 +6,10 @@ import {IComradeRenderer} from "./IComradeRenderer.sol";
 import {IComradeRare}     from "./IComradeRare.sol";
 import {IComradeBloom}    from "./IComradeBloom.sol";
 
+interface IComradeRareRendererSet {
+    function setRenderer(IComradeRenderer r) external;
+}
+
 /// @notice Hybrid ERC-20 + Comrade NFT, with ERC-721 visibility events so wallets
 /// and explorers auto-detect the NFTs without an explicit claim.
 ///
@@ -137,6 +141,13 @@ contract Comrade404 {
     function setRare(IComradeRare r) external onlyOwner {
         rare = r;
         emit RareSet(address(r));
+    }
+
+    /// @notice Owner passthrough so the Rare ERC-721's renderer can be swapped
+    /// after the fact (Rare.setRenderer is gated to onlyComrade404).
+    function setRareRenderer(address newRenderer) external onlyOwner {
+        require(address(rare) != address(0), "rare not configured");
+        IComradeRareRendererSet(address(rare)).setRenderer(IComradeRenderer(newRenderer));
     }
 
     /// @notice Set the bloom filter contract used for CDC/CRC dedup at mint time.
