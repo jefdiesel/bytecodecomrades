@@ -39,9 +39,14 @@ contract ComradeRenderer {
             }
         }
 
+        // Draw order: BG, Type, Skin, Cloths, Audio, Mouth, Head, Eyes, Relics.
+        // Head must paint before Eyes so glasses sit ON TOP of hair.
+        uint8[9] memory drawOrder = [uint8(0),1,2,3,4,5,7,6,8];
+
         ids = new uint16[](count);
         uint8 idx = 0;
-        for (uint8 cat = 0; cat < 9; cat++) {
+        for (uint8 i = 0; i < 9; i++) {
+            uint8 cat = drawOrder[i];
             if (!include[cat]) continue;
             uint256 r = uint256(keccak256(abi.encode(seed, "val", cat)));
             ids[idx++] = taxonomy.pickValue(cat, r);

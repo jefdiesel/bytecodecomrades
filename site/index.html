@@ -101,15 +101,15 @@
 <p class="sub">On-chain art. Procedurally generated. Born from Uniswap v4 swaps.</p>
 
 <div class="tabs">
-  <button class="tab active" data-tab="genesis">Genesis</button>
+  <button class="tab active" data-tab="browse">Browse All</button>
+  <button class="tab" data-tab="genesis">Genesis</button>
   <button class="tab" data-tab="single">Lookup</button>
   <button class="tab" data-tab="wallet">By Wallet</button>
-  <button class="tab" data-tab="browse">Browse All</button>
   <button class="tab" data-tab="settings">Settings</button>
 </div>
 
 <!-- ============ GENESIS ============ -->
-<div class="panel active" id="panel-genesis">
+<div class="panel" id="panel-genesis">
   <div>
     <fieldset>
       <legend>Genesis Bytecode Comrade</legend>
@@ -189,7 +189,7 @@
 </div>
 
 <!-- ============ BROWSE ALL ============ -->
-<div class="panel" id="panel-browse">
+<div class="panel active" id="panel-browse">
   <div>
     <fieldset>
       <legend>Browse Collection</legend>
@@ -418,8 +418,8 @@ async function loadGenesis() {
     setStatus("genesis", "err", e.message || String(e));
   } finally { $("go-genesis").disabled = false; }
 }
-// Auto-load on first visit (tab is active by default)
-window.addEventListener("DOMContentLoaded", () => setTimeout(loadGenesis, 200));
+// Auto-load Browse All on first visit (tab is active by default)
+window.addEventListener("DOMContentLoaded", () => setTimeout(() => $("go-browse").click(), 200));
 
 // =============== SINGLE ===============
 $("rand").onclick = () => { $("single-id").value = Math.floor(Math.random() * 10000); };
@@ -564,7 +564,7 @@ function renderGrid(elId, ids, metas, chain, contract) {
     cell.appendChild(wrap);
     cell.appendChild(lbl);
     cell.onclick = () => {
-      $$(".tab")[0].click();
+      document.querySelector('.tab[data-tab="single"]').click();
       $("single-id").value = id.toString();
       $("go-single").click();
     };
