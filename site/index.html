@@ -579,7 +579,18 @@ async function loadMoreBrowse() {
   browseState.loaded = end;
   browseState.busy = false;
   $("browse-progress").textContent = `${browseState.loaded} of ${total} loaded${browseState.loaded < total ? " — scroll for more" : ". End of collection."}`;
-  if (browseState.loaded >= total && browseObserver) browseObserver.disconnect();
+  if (browseState.loaded >= total) {
+    if (browseObserver) browseObserver.disconnect();
+    return;
+  }
+  // The IntersectionObserver only fires on STATE CHANGE. If the sentinel is
+  // still inside the viewport after we appended cells, it won't re-fire.
+  // Manually keep loading until it scrolls below the trigger zone.
+  const sentinel = $("browse-sentinel");
+  const r = sentinel.getBoundingClientRect();
+  if (r.top < window.innerHeight + 400) {
+    await loadMoreBrowse();
+  }
 }
 
 function appendToGrid(elId, ids, metas, chain, contract) {

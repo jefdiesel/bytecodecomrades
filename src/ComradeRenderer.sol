@@ -39,9 +39,11 @@ contract ComradeRenderer {
             }
         }
 
-        // Draw order: BG, Type, Skin, Cloths, Audio, Mouth, Head, Eyes, Relics.
-        // Head must paint before Eyes so glasses sit ON TOP of hair.
-        uint8[9] memory drawOrder = [uint8(0),1,2,3,4,5,7,6,8];
+        // Draw order: BG, Type, Skin, Cloths, Head, Audio, Mouth, Eyes, Relics.
+        // Head paints first among the face layers so big hats/hair don't cover
+        // audio gear, the mouth, or glasses. Eyes paint last so glasses sit
+        // on top of everything.
+        uint8[9] memory drawOrder = [uint8(0),1,2,3,7,4,5,6,8];
 
         ids = new uint16[](count);
         uint8 idx = 0;
