@@ -177,12 +177,20 @@
   </div>
 </div>
 
-<!-- ============ CLAIMED (Rare ERC-721) ============ -->
+<!-- ============ CLAIMED (Standalone ERC-721) ============ -->
 <div class="panel" id="panel-claimed">
   <div>
     <fieldset>
       <legend>Claimed Comrades</legend>
-      <p class="sub" style="margin:0 0 12px;">Permanent ERC-721s. Holders lifted these out of the 404 system, paid the claim fee, and locked the underlying COMRADE. These have stable serial numbers and trade on any NFT marketplace.</p>
+      <p class="sub" style="margin:0 0 12px;">A claim mints a standalone ERC-721 to your wallet so the Comrade is tradeable on OpenSea / Blur. The art lives on-chain — same renderer, same seed, identical pixels.</p>
+      <div style="font-size:11px; color:var(--muted); line-height:1.7;">
+        <div>Cost per claim: <span class="addr" id="info-fee">— ETH</span></div>
+        <div>Locked per claim: <span class="addr" id="info-lock">— BCC</span></div>
+        <div>Total claimed: <span class="addr" id="info-total">—</span></div>
+        <div style="margin-top:8px;">
+          Contract: <a id="info-contract-link" target="_blank" style="color:var(--accent);" class="addr">—</a>
+        </div>
+      </div>
     </fieldset>
   </div>
   <div>
@@ -231,10 +239,11 @@
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-// Hardwired chain + contracts. Flip to mainnet by changing these three.
-const CHAIN          = "eth-sepolia";
-const BCC_CONTRACT   = "0xb215f556b0f2e3f62105a4309bb35b2258bed13a";
-const RARE_CONTRACT  = "0x394a9adAA2609080b332e6C7547751F68b466d0B";
+// Hardwired chain + contracts. Flip to mainnet by changing these.
+const CHAIN              = "eth-sepolia";
+const BCC_CONTRACT       = "0xb215f556b0f2e3f62105a4309bb35b2258bed13a";
+const CLAIMED_CONTRACT      = "0x394a9adAA2609080b332e6C7547751F68b466d0B";
+const GENESIS_CONTRACT   = "0x8a9ca48dc7674cde098771e6e97c9035fc81ab68";
 
 // Function selectors
 const SEL_TOKEN_URI    = "c87b56dd";  // tokenURI(uint256)
@@ -432,14 +441,18 @@ let claimedObserver = null;
 
 async function startClaimed() {
   $("claimed-grid").innerHTML = "";
-  $("claimed-progress").textContent = "Reading claimed collection size...";
+  $("claimed-progress").textContent = "Reading claimed collection...";
   if (claimedObserver) { claimedObserver.disconnect(); claimedObserver = null; }
+
+  // Populate the info panel — fee, lock amount, total claimed, contract link
+  populateClaimedInfo().catch(e => console.warn("info panel:", e));
+
   try {
-    // ComradeRare exposes nextId() — selector 0x61b8ce8c
-    const r = await ethCall(CHAIN, RARE_CONTRACT, "0x61b8ce8c");
+    const r = await ethCall(CHAIN, CLAIMED_CONTRACT, "0x61b8ce8c"); // nextId()
     const total = Number(decodeUint256(r));
+    $("info-total").textContent = total;
     if (total === 0) {
-      $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first.";
+      $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first — go to Mine and click any of yours.";
       return;
     }
     claimedState = { total, loaded: 0, busy: false };
@@ -451,6 +464,21 @@ async function startClaimed() {
   } catch (e) {
     $("claimed-progress").textContent = "error: " + (e.message || String(e));
   }
+}
+
+async function populateClaimedInfo() {
+  const explorer = CHAIN === "eth-mainnet" ? "https://etherscan.io" : "https://sepolia.etherscan.io";
+  const link = $("info-contract-link");
+  link.href = `${explorer}/address/${CLAIMED_CONTRACT}`;
+  link.textContent = shortAddr(CLAIMED_CONTRACT);
+  try {
+    const [fee, perComrade] = await Promise.all([
+      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_CLAIM_FEE).then(r => decodeUint256(r)),
+      ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_TOKENS_PER).then(r => decodeUint256(r)),
+    ]);
+    $("info-fee").textContent  = formatEth(fee) + " ETH";
+    $("info-lock").textContent = formatEth(perComrade) + " BCC";
+  } catch (e) { /* leave placeholders */ }
 }
 
 async function loadMoreClaimed() {
@@ -467,10 +495,10 @@ async function loadMoreClaimed() {
   for (let i = start; i < end; i++) slice.push(BigInt(i));
   $("claimed-progress").textContent = `${loaded}/${total} loaded, fetching ${slice.length} more...`;
   const metas = await pmap(slice, CONCURRENCY, async (id) => {
-    const r = await ethCall(CHAIN, RARE_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(id));
+    const r = await ethCall(CHAIN, CLAIMED_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(id));
     return parseTokenURI(decodeString(r));
   });
-  appendToGrid("claimed-grid", slice, metas, RARE_CONTRACT, "rare");
+  appendToGrid("claimed-grid", slice, metas, CLAIMED_CONTRACT, "rare");
   claimedState.loaded = end;
   claimedState.busy = false;
   $("claimed-progress").textContent = `${claimedState.loaded} of ${total} permanent Comrades.`;

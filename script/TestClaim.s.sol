@@ -2,12 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2}    from "forge-std/Script.sol";
-import {ComradeRare}         from "../src/ComradeRare.sol";
+import {ComradeClaimed}         from "../src/ComradeClaimed.sol";
+
 import {IComradeRenderer}    from "../src/IComradeRenderer.sol";
 
 interface IBCC {
-    function rare() external view returns (address);
-    function setRare(address) external;
+    function claimedNft() external view returns (address);
+    function setClaimedNft(address) external;
     function setSkip(address, bool) external;
     function setClaimFee(uint256) external;
     function transfer(address, uint256) external returns (bool);
@@ -21,7 +22,7 @@ interface IBCC {
 }
 
 /// @notice End-to-end claim test:
-///   1) Deploy ComradeRare (if not already wired)
+///   1) Deploy ComradeClaimed (if not already wired)
 ///   2) setRare on Comrade404
 ///   3) setClaimFee
 ///   4) Generate a holder wallet, fund it from deployer
@@ -39,19 +40,18 @@ contract TestClaim is Script {
         address deployer  = vm.addr(deployerPk);
         IBCC bcc = IBCC(bccAddr);
 
-        // ---- 1. Deploy + wire Rare if missing ----
-        address rareAddr = bcc.rare();
-        if (rareAddr == address(0)) {
+        // ---- 1. Deploy + wire ClaimedNft if missing ----
+        address claimedAddr = bcc.claimedNft();
+        if (claimedAddr == address(0)) {
             vm.startBroadcast(deployerPk);
-            ComradeRare rare = new ComradeRare(bccAddr, IComradeRenderer(bcc.renderer()));
-            bcc.setRare(address(rare));
-            // Small ETH claim fee so we exercise the fee flow.
+            ComradeClaimed cn = new ComradeClaimed(bccAddr, IComradeRenderer(bcc.renderer()));
+            bcc.setClaimedNft(address(cn));
             bcc.setClaimFee(0.0001 ether);
             vm.stopBroadcast();
-            rareAddr = address(rare);
-            console2.log("deployed Rare:", rareAddr);
+            claimedAddr = address(cn);
+            console2.log("deployed ComradeClaimed:", claimedAddr);
         } else {
-            console2.log("Rare already wired:", rareAddr);
+            console2.log("ComradeClaimed already wired:", claimedAddr);
         }
         // Treasury (deployer) MUST stay skipComrades=true — its balance never
         // matches its (empty) inventory, so un-skipping causes mint/burn
@@ -83,20 +83,20 @@ contract TestClaim is Script {
 
         // ---- 4. Holder calls claim() ----
         vm.startBroadcast(holderPk);
-        uint256 rareId = bcc.claim{value: 0.0001 ether}(cId);
+        uint256 claimedId = bcc.claim{value: 0.0001 ether}(cId);
         vm.stopBroadcast();
-        console2.log("claimed rare id:", rareId);
+        console2.log("claimed id:", claimedId);
 
         // ---- 5. Verify ----
         address ownerAfter = bcc.comradeOwner(cId);
         require(ownerAfter == address(0), "404 NFT not burned");
         console2.log("404 NFT burned OK");
 
-        ComradeRare rareC = ComradeRare(rareAddr);
-        address rareOwner = rareC.ownerOf(rareId);
-        require(rareOwner == holder, "rare not owned by holder");
-        string memory uri = rareC.tokenURI(rareId);
-        console2.log("rare owner:", rareOwner);
-        console2.log("rare tokenURI bytes:", bytes(uri).length);
+        ComradeClaimed cnC = ComradeClaimed(claimedAddr);
+        address co = cnC.ownerOf(claimedId);
+        require(co == holder, "claimed NFT not owned by holder");
+        string memory uri = cnC.tokenURI(claimedId);
+        console2.log("claimed owner:", co);
+        console2.log("claimed tokenURI bytes:", bytes(uri).length);
     }
 }

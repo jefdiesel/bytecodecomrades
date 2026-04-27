@@ -3,10 +3,10 @@ pragma solidity ^0.8.24;
 
 import {ISeedSource}      from "./ISeedSource.sol";
 import {IComradeRenderer} from "./IComradeRenderer.sol";
-import {IComradeRare}     from "./IComradeRare.sol";
+import {IComradeClaimed}     from "./IComradeClaimed.sol";
 import {IComradeBloom}    from "./IComradeBloom.sol";
 
-interface IComradeRareRendererSet {
+interface IComradeClaimedRendererSet {
     function setRenderer(IComradeRenderer r) external;
 }
 
@@ -17,7 +17,7 @@ interface IComradeRareRendererSet {
 /// Selling burns your NFT; the buyer gets a freshly-minted one with a new seed.
 ///
 /// You can OPTIONALLY `claim(id)` to lift a specific Comrade out into a
-/// standalone ComradeRare ERC-721 (separately tradeable on OpenSea, etc.).
+/// standalone ComradeClaimed ERC-721 (separately tradeable on OpenSea, etc.).
 /// claim() charges a fee in COMRADE that goes to the treasury.
 contract Comrade404 {
     string  public constant name     = "Bytecode Comrades";
@@ -54,7 +54,7 @@ contract Comrade404 {
 
     ISeedSource public seed;
     IComradeRenderer public renderer;
-    IComradeRare public rare;
+    IComradeClaimed public claimedNft;
     IComradeBloom public bloom;
     uint8 public maxBloomRetries = 8;
 
@@ -76,13 +76,13 @@ contract Comrade404 {
     event SeedSourceSet(address indexed seed);
     event SkipSet(address indexed account, bool skipped);
     event RendererSet(address indexed renderer);
-    event RareSet(address indexed rare);
+    event ClaimedNftSet(address indexed claimedNft);
     event BloomSet(address indexed bloom);
     event TreasurySet(address indexed treasury);
     event ClaimFeeSet(uint256 feeWei);
     event ClaimFeePaid(address indexed payer, address indexed treasury, uint256 amount);
-    event ComradeClaimed(address indexed holder, uint256 indexed comradeId, uint256 indexed rareId, uint256 fee);
-    event ComradeUnclaimed(address indexed holder, uint256 indexed rareId, uint256 indexed newComradeId);
+    event ComradeClaimed(address indexed holder, uint256 indexed comradeId, uint256 indexed claimedId, uint256 fee);
+    event ComradeUnclaimed(address indexed holder, uint256 indexed claimedId, uint256 indexed newComradeId);
 
     // -------- errors --------
 
@@ -91,8 +91,8 @@ contract Comrade404 {
     error InsufficientAllowance();
     error ZeroTokensPerComrade();
     error NotComradeHolder();
-    error NotRareHolder();
-    error RareNotConfigured();
+    error NotClaimedHolder();
+    error ClaimedNotConfigured();
     error TreasuryNotSet();
     error TransferDisabled();   // ERC-721 transfer not allowed; use ERC-20
     error WrongClaimFee();      // msg.value didn't match claimFeeWei
@@ -138,16 +138,16 @@ contract Comrade404 {
         emit RendererSet(address(r));
     }
 
-    function setRare(IComradeRare r) external onlyOwner {
-        rare = r;
-        emit RareSet(address(r));
+    function setClaimedNft(IComradeClaimed c) external onlyOwner {
+        claimedNft = c;
+        emit ClaimedNftSet(address(c));
     }
 
-    /// @notice Owner passthrough so the Rare ERC-721's renderer can be swapped
-    /// after the fact (Rare.setRenderer is gated to onlyComrade404).
-    function setRareRenderer(address newRenderer) external onlyOwner {
-        require(address(rare) != address(0), "rare not configured");
-        IComradeRareRendererSet(address(rare)).setRenderer(IComradeRenderer(newRenderer));
+    /// @notice Owner passthrough so the Claimed ERC-721's renderer can be swapped
+    /// after the fact (ComradeClaimed.setRenderer is gated to onlyComrade404).
+    function setClaimedRenderer(address newRenderer) external onlyOwner {
+        require(address(claimedNft) != address(0), "claimedNft not configured");
+        IComradeClaimedRendererSet(address(claimedNft)).setRenderer(IComradeRenderer(newRenderer));
     }
 
     /// @notice Set the bloom filter contract used for CDC/CRC dedup at mint time.
@@ -270,7 +270,7 @@ contract Comrade404 {
     // The NFT and the underlying ERC-20 are joined at the hip — they cannot be
     // transferred independently. To trade a specific Comrade, either:
     //   - transfer the whole COMRADE token via the ERC-20 functions, or
-    //   - claim() it into a standalone ComradeRare and trade that.
+    //   - claim() it into a standalone ComradeClaimed and trade that.
 
     function getApproved(uint256) external pure returns (address) { return address(0); }
     function isApprovedForAll(address, address) external pure returns (bool) { return false; }
@@ -280,18 +280,19 @@ contract Comrade404 {
     function safeTransferFrom(address, address, uint256) external pure { revert TransferDisabled(); }
     function safeTransferFrom(address, address, uint256, bytes calldata) external pure { revert TransferDisabled(); }
 
-    // -------- claim / unclaim (rare ERC-721 wrapping with treasury fee) --------
+    // -------- claim / unclaim (standalone ERC-721 wrapping with treasury fee) --------
 
-    /// @notice Lift a Comrade out of the 404 system into a standalone ComradeRare ERC-721.
-    /// Pays `claimFeeWei` ETH to the treasury and locks `tokensPerComrade` worth of
-    /// COMRADE inside this contract (the wrapped value moves with the rare).
+    /// @notice Lift a Comrade out of the 404 system into a standalone ComradeClaimed
+    /// ERC-721 — listable on OpenSea and other NFT markets, separate from its
+    /// underlying COMRADE token. Pays `claimFeeWei` ETH to the treasury and locks
+    /// `tokensPerComrade` of COMRADE inside this contract.
     ///
     /// Caller must:
     ///   - own the Comrade (id)
     ///   - have at least `tokensPerComrade` COMRADE
     ///   - send exactly `claimFeeWei` of ETH as msg.value
-    function claim(uint256 id) external payable returns (uint256 rareId) {
-        if (address(rare) == address(0)) revert RareNotConfigured();
+    function claim(uint256 id) external payable returns (uint256 claimedId) {
+        if (address(claimedNft) == address(0)) revert ClaimedNotConfigured();
         if (comradeOwner[id] != msg.sender) revert NotComradeHolder();
         if (treasury == address(0) && claimFeeWei > 0) revert TreasuryNotSet();
         if (msg.value != claimFeeWei) revert WrongClaimFee();
@@ -311,7 +312,6 @@ contract Comrade404 {
         }
         emit Transfer(msg.sender, address(this), tokensPerComrade);
 
-        // Forward ETH fee to treasury
         if (msg.value > 0) {
             (bool ok, ) = treasury.call{value: msg.value}("");
             if (!ok) revert TreasuryRejectedEth();
@@ -321,21 +321,19 @@ contract Comrade404 {
         emit ComradeBurned(id, msg.sender);
         emit Transfer721(msg.sender, address(0), id);
 
-        // Mint the standalone rare
-        rareId = rare.mint(msg.sender, c.seed, 0, id);
-        emit ComradeClaimed(msg.sender, id, rareId, msg.value);
+        claimedId = claimedNft.mint(msg.sender, c.seed, id);
+        emit ComradeClaimed(msg.sender, id, claimedId, msg.value);
     }
 
-    /// @notice Burn a ComradeRare ERC-721 and return its wrapped COMRADE.
-    /// Mints a fresh in-404 Comrade with the rare's original seed.
-    /// No fee on unclaim.
-    function unclaim(uint256 rareId) external returns (uint256 newComradeId) {
-        if (address(rare) == address(0)) revert RareNotConfigured();
-        if (rare.ownerOf(rareId) != msg.sender) revert NotRareHolder();
+    /// @notice Burn a ComradeClaimed ERC-721 and return its wrapped COMRADE.
+    /// Mints a fresh in-404 Comrade with the same original seed. No fee on unclaim.
+    function unclaim(uint256 claimedId) external returns (uint256 newComradeId) {
+        if (address(claimedNft) == address(0)) revert ClaimedNotConfigured();
+        if (claimedNft.ownerOf(claimedId) != msg.sender) revert NotClaimedHolder();
 
-        (bytes32 oldSeed,,,) = rare.rares(rareId);
+        (bytes32 oldSeed,,) = claimedNft.claimed(claimedId);
 
-        rare.burn(rareId);
+        claimedNft.burn(claimedId);
 
         unchecked {
             balanceOf[address(this)] -= tokensPerComrade;
@@ -353,7 +351,7 @@ contract Comrade404 {
         _inventory[msg.sender].push(newComradeId);
         emit ComradeMinted(newComradeId, msg.sender, oldSeed);
         emit Transfer721(address(0), msg.sender, newComradeId);
-        emit ComradeUnclaimed(msg.sender, rareId, newComradeId);
+        emit ComradeUnclaimed(msg.sender, claimedId, newComradeId);
     }
 
     // -------- internals --------

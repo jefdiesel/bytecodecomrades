@@ -40,8 +40,8 @@ contract RedeploySpriteData is Script {
 
         console2.log("new spriteData:", address(data));
         console2.log("new renderer:  ", address(renderer));
-        // Note: ComradeRare.setRenderer is gated to onlyComrade404 — to re-point
-        // the Rare contract's renderer, add a passthrough setter on Comrade404
-        // (or just leave Rares using the renderer captured at claim time).
+        // Note: ComradeClaimed.setRenderer is gated to onlyComrade404. Use
+        // Comrade404.setClaimedRenderer() to re-point existing Claimed NFTs at
+        // the new renderer.
     }
 }
