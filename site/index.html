@@ -459,7 +459,7 @@ async function startClaimed() {
       $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first — go to Mine and click any of yours.";
       return;
     }
-    claimedState = { total, loaded: 0, busy: false };
+    claimedState = { total, loaded: 0, live: 0, busy: false };
     await loadMoreClaimed();
     claimedObserver = new IntersectionObserver(async (entries) => {
       if (entries[0].isIntersecting) await loadMoreClaimed();
@@ -497,15 +497,30 @@ async function loadMoreClaimed() {
   const end = Math.min(loaded + BATCH_SIZE, total);
   const slice = [];
   for (let i = start; i < end; i++) slice.push(BigInt(i));
-  $("claimed-progress").textContent = `${loaded}/${total} loaded, fetching ${slice.length} more...`;
-  const metas = await pmap(slice, CONCURRENCY, async (id) => {
+  $("claimed-progress").textContent = `${loaded}/${total} scanned...`;
+
+  // Fetch each token. tokenURI reverts on burned tokens — pmap catches it,
+  // we filter those out so burned NFTs don't appear as "err" cards.
+  const results = await pmap(slice, CONCURRENCY, async (id) => {
     const r = await ethCall(CHAIN, CLAIMED_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(id));
     return parseTokenURI(decodeString(r));
   });
-  appendToGrid("claimed-grid", slice, metas, CLAIMED_CONTRACT, "claimed");
+  const liveIds = [];
+  const liveMetas = [];
+  for (let i = 0; i < slice.length; i++) {
+    if (results[i] && !results[i].__error) {
+      liveIds.push(slice[i]);
+      liveMetas.push(results[i]);
+    }
+  }
+  appendToGrid("claimed-grid", liveIds, liveMetas, CLAIMED_CONTRACT, "claimed");
+  // Track live count separately so the displayed total reflects only existing NFTs.
+  claimedState.live = (claimedState.live || 0) + liveIds.length;
   claimedState.loaded = end;
   claimedState.busy = false;
-  $("claimed-progress").textContent = `${claimedState.loaded} of ${total} permanent Comrades.`;
+  const burned = claimedState.loaded - claimedState.live;
+  $("claimed-progress").textContent = `${claimedState.live} permanent Comrades${burned > 0 ? ` (${burned} unclaimed/burned)` : ""}.`;
+  $("info-total").textContent = `${claimedState.live} live${burned > 0 ? ` / ${claimedState.loaded} total minted` : ""}`;
   if (claimedState.loaded >= total) { if (claimedObserver) claimedObserver.disconnect(); return; }
   const r = $("claimed-sentinel").getBoundingClientRect();
   if (r.top < window.innerHeight + 400) await loadMoreClaimed();
