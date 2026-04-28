@@ -28,15 +28,16 @@ contract AddMoreLP is Script {
 
         vm.startBroadcast();
         IBCC(comrade).approve(lpRouter, type(uint256).max);
-        IWETHFunds(weth).deposit{value: 0.05 ether}();
+        IWETHFunds(weth).deposit{value: 0.1 ether}();
         IWETHFunds(weth).approve(lpRouter, type(uint256).max);
 
-        // Wider bracket around the $1 anchor so swaps don't exhaust quickly
+        // Wide bracket with enough liquidity to absorb dozens of test buys.
+        // Range -82000..-78000 (4000 ticks), liquidity 1e19 → many BCC of capacity.
         IPoolManager.ModifyLiquidityParams memory mlp = IPoolManager.ModifyLiquidityParams({
-            tickLower: -80400, tickUpper: -79680, liquidityDelta: 1e17, salt: bytes32(0)
+            tickLower: -82020, tickUpper: -78000, liquidityDelta: 1e19, salt: bytes32(0)
         });
         PoolModifyLiquidityTest(lpRouter).modifyLiquidity(key, mlp, "");
         vm.stopBroadcast();
-        console2.log("Added LP, liquidity 1e17 across [-80400, -79680]");
+        console2.log("Added LP, liquidity 1e19 across [-82000, -78000]");
     }
 }

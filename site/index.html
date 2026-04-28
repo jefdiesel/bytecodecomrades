@@ -523,7 +523,7 @@ async function startClaimed() {
     const total = Number(decodeUint256(r));
     $("info-total").textContent = total;
     if (total === 0) {
-      $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first — go to Mine and click any of yours.";
+      $("claimed-progress").textContent = "No Comrades have been claimed yet. Be the first — go to the View tab and click one of yours.";
       return;
     }
     claimedState = { total, loaded: 0, live: 0, busy: false };
@@ -684,20 +684,90 @@ function setTradeMode(mode) {
 $("trade-tab-buy").onclick  = () => setTradeMode("buy");
 $("trade-tab-sell").onclick = () => setTradeMode("sell");
 
+// Cache the live quote so click handler can use it without re-querying
+let liveEthCost = null;
+
+function approxQuote(n) {
+  const fee = HOOK_FEE_BPS / 10000;
+  return tradeMode === "buy" ? (n / ETH_USD) * (1 + fee) : (n / ETH_USD) * (1 - fee);
+}
+
 function updateTradeQuote() {
   const n = parseInt($("trade-amount-in").value, 10);
-  if (!n || n <= 0) { $("trade-amount-out").value = ""; return; }
-  // Linear approx at the launch anchor: 1 BCC = 1/ETH_USD ETH.
-  // Buy: pay ETH = n / ETH_USD × (1 + hook_fee)  (you pay slightly more for the fee)
-  // Sell: receive ETH = n / ETH_USD × (1 - hook_fee)
-  const fee = HOOK_FEE_BPS / 10000;
-  const ethAmount = tradeMode === "buy"
-    ? (n / ETH_USD) * (1 + fee)
-    : (n / ETH_USD) * (1 - fee);
-  $("trade-amount-out").value = ethAmount.toPrecision(6) + " ETH";
+  if (!n || n <= 0) { $("trade-amount-out").value = ""; liveEthCost = null; return; }
+  // Show approx instantly so the field never looks empty
+  $("trade-amount-out").value = approxQuote(n).toPrecision(6) + " ETH (estimating…)";
+  liveEthCost = null;
+  fetchLiveQuote(n).catch(() => { /* keep approx */ });
 }
+
+async function fetchLiveQuote(n) {
+  // Simulate the actual call against ComradeSwap with massive slippage so the
+  // contract returns the real cost without the InsufficientOutput check tripping.
+  const HUGE = 100n * (10n ** 18n);  // 100 ETH max — never trips
+  const ZERO = 1n;                    // accept any output for sell
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+  const amountWei = BigInt(n) * (10n ** 18n);
+
+  let data, value;
+  if (tradeMode === "buy") {
+    data = "0x" + SEL_BUY
+      + bigToHex(amountWei).slice(2).padStart(64, "0")
+      + bigToHex(HUGE).slice(2).padStart(64, "0")
+      + bigToHex(deadline).slice(2).padStart(64, "0");
+    value = bigToHex(HUGE);
+  } else {
+    data = "0x" + SEL_SELL
+      + bigToHex(amountWei).slice(2).padStart(64, "0")
+      + bigToHex(ZERO).slice(2).padStart(64, "0")
+      + bigToHex(deadline).slice(2).padStart(64, "0");
+    value = "0x0";
+  }
+
+  // For sell we'd need an existing approval — skip live quote if not approved
+  // and just keep the approximation.
+  if (tradeMode === "sell" && walletAddr) {
+    const allowanceHex = await ethCall(CHAIN, BCC_CONTRACT,
+      "0x" + SEL_ALLOWANCE + encAddr(walletAddr) + encAddr(SWAP_CONTRACT));
+    if (decodeUint256(allowanceHex) < amountWei) {
+      $("trade-amount-out").value = approxQuote(n).toPrecision(6) + " ETH (approve first to see live quote)";
+      return;
+    }
+  }
+
+  // Use eth_call with from=walletAddr (or zero addr for view) so static-call simulation works
+  const r = await fetch(rpcUrl(CHAIN), {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc:"2.0", id:1, method:"eth_call",
+      params:[{ from: walletAddr || "0x0000000000000000000000000000000000000001", to: SWAP_CONTRACT, data, value }, "latest"]
+    }),
+  });
+  const j = await r.json();
+  if (j.error) {
+    $("trade-amount-out").value = "pool can't fill — " + (decodeSwapError(j.error.data) || "no liquidity");
+    liveEthCost = null;
+    return;
+  }
+  const result = BigInt(j.result);  // ETH spent (buy) or ETH received (sell), 18 decimals
+  const ethAmount = Number(result) / 1e18;
+  liveEthCost = ethAmount;
+  $("trade-amount-out").value = ethAmount.toFixed(6) + " ETH (live)";
+}
+
+function decodeSwapError(data) {
+  if (!data || data.length < 10) return null;
+  const sel = data.slice(0, 10).toLowerCase();
+  if (sel === "0x7c9c6e8f") return "exhausted bracket — try smaller amount";
+  if (sel === "0xbb2875c3") return "slippage exceeded — raise tolerance";
+  if (sel === "0x203d82d8") return "deadline expired";
+  return null;
+}
+
 $("trade-amount-in").addEventListener("input", () => { updateTradeQuote(); updateTradeButton(); });
 $("trade-slippage").addEventListener("input", updateTradeButton);
+$("trade-tab-buy").addEventListener("click", () => updateTradeQuote());
+$("trade-tab-sell").addEventListener("click", () => updateTradeQuote());
 
 function updateTradeButton() {
   const btn = $("trade-btn");
@@ -747,8 +817,9 @@ $("trade-btn").onclick = async () => {
     const deadline    = Math.floor(Date.now() / 1000) + 1800;  // 30 min — generous so wallet popups never expire
 
     if (tradeMode === "buy") {
-      const ethEstimate = ethAtAnchor * (1 + fee);
-      const maxEthIn = ethEstimate * (1 + slippagePct / 100);
+      // Prefer the live quote if we have it (much more accurate than anchor approx)
+      const baseCost = liveEthCost != null ? liveEthCost : ethAtAnchor * (1 + fee);
+      const maxEthIn = baseCost * (1 + slippagePct / 100);
       const bccOutWei  = BigInt(n) * (10n ** 18n);
       const maxEthInWei = BigInt(Math.floor(maxEthIn * 1e18));
       const data = "0x" + SEL_BUY
@@ -780,12 +851,11 @@ $("trade-btn").onclick = async () => {
       status.className = "status ok";
       status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
       const ok = await waitReceipt(txHash);
-      if (ok) status.textContent = `Bought ${n} Comrade${n>1?"s":""}. Excess ETH refunded. Check Mine tab.`;
+      if (ok) status.textContent = `Bought ${n} Comrade${n>1?"s":""}. Excess ETH refunded. Check the View tab.`;
       else    { status.className = "status err"; status.textContent = "Tx reverted (likely slippage). Try higher tolerance or smaller order."; }
     } else {
-      // SELL: exact-input on BCC. Need approval first.
-      const ethEstimate = ethAtAnchor * (1 - fee);
-      const minEthOut   = ethEstimate * (1 - slippagePct / 100);
+      const baseReturn = liveEthCost != null ? liveEthCost : ethAtAnchor * (1 - fee);
+      const minEthOut  = baseReturn * (1 - slippagePct / 100);
       const amountWei    = BigInt(n) * (10n ** 18n);
       const minEthOutWei = BigInt(Math.floor(minEthOut * 1e18));
 
@@ -836,12 +906,22 @@ $("trade-btn").onclick = async () => {
     }
   } catch (e) {
     status.className = "status err";
-    const msg = e?.message?.slice(0, 200) || String(e);
-    status.textContent = msg;
-    dbg(`CAUGHT: ${msg}`);
+    const rawMsg = e?.message?.slice(0, 200) || String(e);
+    // Try to extract revert data from the error and decode it
+    const revertData = e?.data?.originalError?.data || e?.data || e?.error?.data
+      || (typeof e?.message === "string" && e.message.match(/0x[0-9a-fA-F]+/)?.[0]);
+    const decoded = decodeSwapError(revertData);
+    let friendly = decoded;
+    if (!friendly) {
+      if (rawMsg.toLowerCase().includes("user rejected")) friendly = "you rejected the tx";
+      else if (rawMsg.toLowerCase().includes("insufficient funds")) friendly = "wallet doesn't have enough ETH";
+      else friendly = rawMsg;
+    }
+    status.textContent = friendly;
+    dbg(`CAUGHT: ${rawMsg}`);
     if (e?.code) dbg(`code=${e.code}`);
-    if (e?.data) dbg(`data=${JSON.stringify(e.data).slice(0,300)}`);
-    if (e?.cause) dbg(`cause=${JSON.stringify(e.cause).slice(0,300)}`);
+    if (revertData) dbg(`revertData=${revertData}`);
+    if (decoded) dbg(`decoded=${decoded}`);
   } finally {
     updateTradeButton();
   }
