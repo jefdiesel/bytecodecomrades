@@ -604,6 +604,7 @@ async function loadMine() {
 }
 
 // =============== TRADE (swap) ===============
+let walletAddr = null;
 let tradeMode = "buy"; // "buy" or "sell"
 
 function setTradeMode(mode) {
@@ -805,7 +806,7 @@ $("detail-modal").onclick = (e) => { if (e.target === $("detail-modal")) closeDe
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
 
 // =============== WALLET / CLAIM ===============
-let walletAddr = null;
+// (walletAddr declared near the top of script — before any initTrade reads it)
 
 function shortAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
 
