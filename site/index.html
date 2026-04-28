@@ -173,10 +173,11 @@
         <button id="trade-tab-buy"  class="ghost" style="flex:1;">Buy BCC</button>
         <button id="trade-tab-sell" class="ghost" style="flex:1;">Sell BCC</button>
       </div>
-      <p class="sub" style="margin-top:0; margin-bottom:12px; color:var(--accent);">
-        Anchor: <span id="trade-spot">1 BCC ≈ 0.000333 ETH</span>
-        <span style="color:var(--muted);"> (live price moves with each swap)</span>
-      </p>
+      <div style="font-size:11px; color:var(--muted); line-height:1.7; margin-bottom:12px; padding:8px; border:1px solid var(--border); border-radius:4px;">
+        <div>BCC: <a id="trade-bcc-link" target="_blank" style="color:var(--accent);" class="addr">—</a></div>
+        <div>WETH: <a id="trade-weth-link" target="_blank" style="color:var(--accent);" class="addr">—</a></div>
+        <div>Pool: BCC / WETH, 0.3% fee, hook fires every swap</div>
+      </div>
       <label id="trade-in-label">Comrades to buy</label>
       <input id="trade-amount-in" type="number" min="1" step="1" value="1">
       <label id="trade-out-label" style="margin-top:12px;">Estimated ETH cost</label>
@@ -276,7 +277,7 @@ const CHAIN              = "eth-sepolia";
 const BCC_CONTRACT       = "0x11935c26a2ad83c49507793b036b976790457ef9";
 const CLAIMED_CONTRACT   = "0x5da70bb34674f604a2f10ac234162440875225ee";
 const GENESIS_CONTRACT   = "0xf276811e32e7c74eccf6033e9739dbbb2d83dac5";
-const SWAP_CONTRACT      = "0x66B1d1835d8fe0b946A9372F683f6b4A846ea08A";
+const SWAP_CONTRACT      = "0x37e63eEE09547763383Ff87bC1f5510182aE1947";
 
 // Pool anchor for quote approximations (BCC = $1 at $3k ETH → 3000 BCC per ETH).
 const ETH_USD            = 3000;
@@ -810,9 +811,15 @@ async function waitReceipt(txHash) {
 (function initTrade() {
   setTradeMode("buy");
   const explorer = CHAIN === "eth-mainnet" ? "https://etherscan.io" : "https://sepolia.etherscan.io";
-  const link = $("trade-router-link");
-  link.href = `${explorer}/address/${SWAP_CONTRACT}`;
-  link.textContent = SWAP_CONTRACT.slice(0,6) + "…" + SWAP_CONTRACT.slice(-4);
+  const WETH_ADDR = CHAIN === "eth-mainnet"
+    ? "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+    : "0xfff9976782d46cc05630d1f6ebab18b2324d6b14";
+  $("trade-router-link").href = `${explorer}/address/${SWAP_CONTRACT}`;
+  $("trade-router-link").textContent = SWAP_CONTRACT;
+  $("trade-bcc-link").href  = `${explorer}/address/${BCC_CONTRACT}`;
+  $("trade-bcc-link").textContent = BCC_CONTRACT;
+  $("trade-weth-link").href = `${explorer}/address/${WETH_ADDR}`;
+  $("trade-weth-link").textContent = WETH_ADDR;
 })();
 
 // Trade is the default tab — no auto-load needed (the swap UI is static).

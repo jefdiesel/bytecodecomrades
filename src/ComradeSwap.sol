@@ -97,8 +97,10 @@ contract ComradeSwap is IUnlockCallback {
         if (p.isBuy) {
             // Exact-output: pool consumed -d1 WETH, returned +d0 BCC (= bccOut target).
             uint256 wethOwed = uint256(-d1);
-            // Slippage guard: maxEthIn was passed in p.minOut
             if (wethOwed > p.minOut) revert InsufficientOutput();
+
+            // v4 settle pattern: sync(), transfer to PM, settle()
+            poolManager.sync(key.currency1);
             weth.deposit{value: wethOwed}();
             weth.transfer(address(poolManager), wethOwed);
             poolManager.settle();
@@ -106,15 +108,16 @@ contract ComradeSwap is IUnlockCallback {
             uint256 bccOut = uint256(d0);
             poolManager.take(key.currency0, p.sender, bccOut);
 
-            // Refund any leftover ETH
             if (address(this).balance > 0) {
                 (bool ok,) = p.sender.call{value: address(this).balance}("");
                 if (!ok) revert EthRefundFailed();
             }
-            return abi.encode(wethOwed);  // return ETH spent (frontend can show)
+            return abi.encode(wethOwed);
         } else {
             // Owe BCC (token0, negative), receive WETH (token1, positive).
             uint256 bccOwed = uint256(-d0);
+
+            poolManager.sync(key.currency0);
             comrade.transfer(address(poolManager), bccOwed);
             poolManager.settle();
 
