@@ -211,8 +211,11 @@
         <button id="trade-tab-buy"  class="ghost" style="flex:1;">Buy BCC</button>
         <button id="trade-tab-sell" class="ghost" style="flex:1;">Sell BCC</button>
       </div>
+      <p class="sub" style="margin-top:0; margin-bottom:12px; color:var(--accent);">
+        Spot: <span id="trade-spot">1 BCC ≈ 0.000333 ETH</span>
+      </p>
       <label id="trade-in-label">Comrades to buy</label>
-      <input id="trade-amount-in" type="number" min="1" step="1" placeholder="1">
+      <input id="trade-amount-in" type="number" min="1" step="1" value="1">
       <label id="trade-out-label" style="margin-top:12px;">Estimated ETH cost</label>
       <input id="trade-amount-out" type="text" readonly placeholder="0.0">
       <label style="margin-top:12px;">Max slippage (%)</label>
@@ -807,17 +810,25 @@ let walletAddr = null;
 function shortAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
 
 async function connectWallet() {
+  const btn = $("wallet-connect");
+  const status = $("wallet-status");
   if (!window.ethereum) {
-    alert("No injected wallet found. Install MetaMask or another EIP-1193 wallet.");
+    status.innerHTML = '<span style="color:#ff5050;">no injected wallet — install MetaMask, Rabby, or Coinbase Wallet</span>';
     return;
   }
+  btn.disabled = true;
+  btn.textContent = "Connecting…";
   try {
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    if (!accounts || accounts.length === 0) {
+      status.innerHTML = '<span style="color:#ff5050;">no accounts returned — unlock your wallet</span>';
+      return;
+    }
     walletAddr = accounts[0];
     renderWalletBar();
     if (currentDetailId !== null) refreshClaimBox();
     window.ethereum.on?.("accountsChanged", (accs) => {
-      walletAddr = accs[0] || null;
+      walletAddr = (accs && accs[0]) || null;
       renderWalletBar();
       if (currentDetailId !== null) refreshClaimBox();
     });
@@ -825,7 +836,12 @@ async function connectWallet() {
       if (currentDetailId !== null) refreshClaimBox();
     });
   } catch (e) {
-    console.error(e);
+    console.error("wallet connect error:", e);
+    const msg = e?.code === 4001 ? "user rejected" : (e?.message || String(e)).slice(0, 100);
+    status.innerHTML = `<span style="color:#ff5050;">connect failed: ${msg}</span>`;
+  } finally {
+    btn.disabled = false;
+    if (!walletAddr) btn.textContent = "Connect";
   }
 }
 
@@ -1049,11 +1065,18 @@ $("unclaim-btn").onclick = async () => {
   }
 };
 
-// Auto-connect if user previously connected
-if (window.ethereum?.selectedAddress) {
-  walletAddr = window.ethereum.selectedAddress;
-  renderWalletBar();
-}
+// Silent re-connect if wallet already authorized this site
+(async function silentConnect() {
+  if (!window.ethereum) return;
+  try {
+    // eth_accounts (no prompt) — only returns accounts if user previously approved
+    const accs = await window.ethereum.request({ method: "eth_accounts" });
+    if (accs && accs[0]) {
+      walletAddr = accs[0];
+      renderWalletBar();
+    }
+  } catch (_) { /* ignore */ }
+})();
 
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 </script>
