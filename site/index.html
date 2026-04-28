@@ -450,7 +450,7 @@ async function startAll() {
     const r = await ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_NEXT_ID);
     const total = Number(decodeUint256(r));
     if (total === 0) { $("all-progress").textContent = "Collection is empty."; return; }
-    allState = { total, loaded: 0, busy: false };
+    allState = { total, loaded: 0, live: 0, busy: false };
     await loadMoreAll();
     allObserver = new IntersectionObserver(async (entries) => {
       if (entries[0].isIntersecting) await loadMoreAll();
@@ -474,15 +474,31 @@ async function loadMoreAll() {
   const end = Math.min(loaded + BATCH_SIZE, total);
   const slice = [];
   for (let i = start; i < end; i++) slice.push(BigInt(i));
-  $("all-progress").textContent = `${loaded}/${total} loaded, fetching ${slice.length} more...`;
-  const metas = await pmap(slice, CONCURRENCY, async (id) => {
+  $("all-progress").textContent = `${loaded}/${total} scanned...`;
+
+  // Fetch ownership in parallel — burned 404 IDs (claimed-then-deleted) have
+  // owner=0x0 and would render default-seed ghost art. Skip those.
+  const owners = await pmap(slice, CONCURRENCY, async (id) => {
+    const r = await ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_COMRADE_OWNER + encU256(id));
+    return "0x" + r.slice(-40);
+  });
+
+  const liveSlice = [];
+  for (let i = 0; i < slice.length; i++) {
+    if (owners[i] && owners[i] !== "0x0000000000000000000000000000000000000000") liveSlice.push(slice[i]);
+  }
+
+  const metas = await pmap(liveSlice, CONCURRENCY, async (id) => {
     const r = await ethCall(CHAIN, BCC_CONTRACT, "0x" + SEL_TOKEN_URI + encU256(id));
     return parseTokenURI(decodeString(r));
   });
-  appendToGrid("all-grid", slice, metas, BCC_CONTRACT, "bcc");
+  appendToGrid("all-grid", liveSlice, metas, BCC_CONTRACT, "bcc");
+
+  allState.live = (allState.live || 0) + liveSlice.length;
   allState.loaded = end;
   allState.busy = false;
-  $("all-progress").textContent = `${allState.loaded} of ${total} loaded${allState.loaded < total ? " — scroll for more" : ". End of collection."}`;
+  const burned = allState.loaded - allState.live;
+  $("all-progress").textContent = `${allState.live} live${burned > 0 ? ` (${burned} burned/claimed)` : ""}${allState.loaded < total ? " — scroll for more" : ""}`;
   if (allState.loaded >= total) { if (allObserver) allObserver.disconnect(); return; }
   const r = $("all-sentinel").getBoundingClientRect();
   if (r.top < window.innerHeight + 400) await loadMoreAll();
