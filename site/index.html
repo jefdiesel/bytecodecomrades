@@ -188,6 +188,10 @@
       <button id="trade-btn" disabled>Connect wallet first</button>
       <p class="sub" style="margin-top:12px;">Whole BCC only — each one is an NFT. Buys use exact-output: you say how many, the router pulls just enough ETH and refunds excess. Hook fee (0.1%) included. Slippage enforced on-chain.</p>
       <div class="status" id="trade-status" style="margin-top:8px;"></div>
+      <details style="margin-top:12px;">
+        <summary style="font-size:11px; color:var(--muted); cursor:pointer;">Debug log</summary>
+        <pre id="trade-debug" style="background:#000; color:#888; padding:8px; border-radius:4px; font-size:10px; max-height:300px; overflow:auto; white-space:pre-wrap; word-break:break-all;">no events yet — click Buy/Sell to see what's sent + what comes back</pre>
+      </details>
       <p class="sub" style="margin-top:12px; font-size:10px;">
         Router: <a id="trade-router-link" target="_blank" style="color:var(--accent);" class="addr">—</a>
       </p>
@@ -704,6 +708,13 @@ function updateTradeButton() {
   btn.textContent = tradeMode === "buy" ? `Buy ${n} Comrade${n>1?"s":""}` : `Sell ${n} Comrade${n>1?"s":""}`;
 }
 
+function dbg(line) {
+  const el = $("trade-debug");
+  const ts = new Date().toISOString().slice(11, 23);
+  el.textContent = `[${ts}] ${line}\n` + el.textContent;
+  console.log("[trade]", line);
+}
+
 $("trade-btn").onclick = async () => {
   if (!walletAddr) return;
   const status = $("trade-status");
@@ -711,14 +722,22 @@ $("trade-btn").onclick = async () => {
   status.textContent = "Preparing transaction…";
   $("trade-btn").disabled = true;
   try {
-    // Switch chain if needed
+    dbg(`mode=${tradeMode} wallet=${walletAddr}`);
     const wantChainHex = CHAIN_HEX[CHAIN];
     const curChainHex  = await window.ethereum.request({ method: "eth_chainId" });
+    dbg(`chain current=${curChainHex} want=${wantChainHex}`);
     if (curChainHex !== wantChainHex) {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: wantChainHex }],
-      });
+      dbg("requesting chain switch...");
+      try {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: wantChainHex }],
+        });
+        dbg("chain switched OK");
+      } catch (e) {
+        dbg(`chain switch FAILED: ${e?.message || e}`);
+        throw e;
+      }
     }
 
     const n           = parseInt($("trade-amount-in").value, 10);
@@ -728,21 +747,36 @@ $("trade-btn").onclick = async () => {
     const deadline    = Math.floor(Date.now() / 1000) + 600;
 
     if (tradeMode === "buy") {
-      // EXACT-OUTPUT buy: specify exactly N BCC, allow up to maxEthIn worth of ETH.
-      // Estimate ETH cost at anchor + hook fee + slippage tolerance.
       const ethEstimate = ethAtAnchor * (1 + fee);
       const maxEthIn = ethEstimate * (1 + slippagePct / 100);
       const bccOutWei  = BigInt(n) * (10n ** 18n);
       const maxEthInWei = BigInt(Math.floor(maxEthIn * 1e18));
-      // Send msg.value = maxEthIn so the router can spend up to that. Excess refunded.
       const data = "0x" + SEL_BUY
         + bigToHex(bccOutWei).slice(2).padStart(64, "0")
         + bigToHex(maxEthInWei).slice(2).padStart(64, "0")
         + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
-      const txHash = await window.ethereum.request({
-        method: "eth_sendTransaction",
-        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data, value: bigToHex(maxEthInWei) }],
-      });
+      const txParams = { from: walletAddr, to: SWAP_CONTRACT, data: data, value: bigToHex(maxEthInWei) };
+      dbg(`buy ${n} BCC, maxEthIn=${maxEthIn} ETH (${maxEthInWei} wei)`);
+      dbg(`to=${SWAP_CONTRACT}`);
+      dbg(`data=${data}`);
+      dbg(`value=${txParams.value}`);
+
+      // Pre-flight estimate so we surface the real revert reason
+      try {
+        const gas = await window.ethereum.request({ method: "eth_estimateGas", params: [txParams] });
+        dbg(`estimateGas OK: ${gas}`);
+      } catch (e) {
+        const code = e?.code;
+        const msg = e?.message || String(e);
+        const data = e?.data?.originalError?.data || e?.data || e?.error?.data;
+        dbg(`estimateGas FAILED code=${code}`);
+        dbg(`estimateGas msg=${msg}`);
+        if (data) dbg(`estimateGas revertData=${data}`);
+        throw e;
+      }
+
+      const txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams] });
+      dbg(`tx submitted: ${txHash}`);
       status.className = "status ok";
       status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
       const ok = await waitReceipt(txHash);
@@ -775,10 +809,25 @@ $("trade-btn").onclick = async () => {
         + bigToHex(amountWei).slice(2).padStart(64, "0")
         + bigToHex(minEthOutWei).slice(2).padStart(64, "0")
         + bigToHex(BigInt(deadline)).slice(2).padStart(64, "0");
-      const txHash = await window.ethereum.request({
-        method: "eth_sendTransaction",
-        params: [{ from: walletAddr, to: SWAP_CONTRACT, data: data }],
-      });
+      const txParams = { from: walletAddr, to: SWAP_CONTRACT, data: data };
+      dbg(`sell ${n} BCC, minEthOut=${minEthOut} ETH (${minEthOutWei} wei)`);
+      dbg(`data=${data}`);
+
+      try {
+        const gas = await window.ethereum.request({ method: "eth_estimateGas", params: [txParams] });
+        dbg(`estimateGas OK: ${gas}`);
+      } catch (e) {
+        const code = e?.code;
+        const msg = e?.message || String(e);
+        const revertData = e?.data?.originalError?.data || e?.data || e?.error?.data;
+        dbg(`estimateGas FAILED code=${code}`);
+        dbg(`estimateGas msg=${msg}`);
+        if (revertData) dbg(`estimateGas revertData=${revertData}`);
+        throw e;
+      }
+
+      const txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams] });
+      dbg(`tx submitted: ${txHash}`);
       status.className = "status ok";
       status.textContent = `Submitted: ${txHash.slice(0,10)}… waiting for confirmation`;
       const ok = await waitReceipt(txHash);
@@ -787,7 +836,12 @@ $("trade-btn").onclick = async () => {
     }
   } catch (e) {
     status.className = "status err";
-    status.textContent = e?.message?.slice(0, 200) || String(e);
+    const msg = e?.message?.slice(0, 200) || String(e);
+    status.textContent = msg;
+    dbg(`CAUGHT: ${msg}`);
+    if (e?.code) dbg(`code=${e.code}`);
+    if (e?.data) dbg(`data=${JSON.stringify(e.data).slice(0,300)}`);
+    if (e?.cause) dbg(`cause=${JSON.stringify(e.cause).slice(0,300)}`);
   } finally {
     updateTradeButton();
   }
