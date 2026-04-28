@@ -744,7 +744,7 @@ $("trade-btn").onclick = async () => {
     const slippagePct = parseFloat($("trade-slippage").value || "1");
     const fee         = HOOK_FEE_BPS / 10000;
     const ethAtAnchor = n / ETH_USD;  // ETH equivalent at $1 anchor
-    const deadline    = Math.floor(Date.now() / 1000) + 600;
+    const deadline    = Math.floor(Date.now() / 1000) + 1800;  // 30 min — generous so wallet popups never expire
 
     if (tradeMode === "buy") {
       const ethEstimate = ethAtAnchor * (1 + fee);
