@@ -19,7 +19,8 @@ import {ISeedSource} from "./ISeedSource.sol";
 /// Mine via HookMiner before deploy (CREATE2 salt).
 contract ComradeHook is IHooks, ISeedSource {
     /// @dev Bumped each redeploy to force fresh CREATE2 bytecode → fresh address.
-    uint256 public constant DEPLOY_REVISION = 2;
+    /// Rev 3: switched to canonical Uniswap take()-based fee skim; safer cast.
+    uint256 public constant DEPLOY_REVISION = 3;
 
     IPoolManager public immutable poolManager;
 
@@ -65,20 +66,23 @@ contract ComradeHook is IHooks, ISeedSource {
         owner = newOwner;
     }
 
-    /// @notice Withdraw accumulated fees of a given currency from the PoolManager
-    /// to a recipient. Hook's CurrencyDelta is settled via take().
+    /// @notice Withdraw accumulated fees. Hook holds real tokens (taken inline
+    /// during afterSwap), so this is just a simple transfer — no unlock dance.
     function withdrawFees(Currency currency, address to, uint256 amount) external onlyOwner {
-        poolManager.unlock(abi.encode(currency, to, amount));
+        if (Currency.unwrap(currency) == address(0)) {
+            (bool ok, ) = to.call{value: amount}("");
+            require(ok, "ETH transfer failed");
+        } else {
+            // Solidity-level interface for the standard ERC-20 transfer
+            (bool ok, bytes memory ret) = Currency.unwrap(currency).call(
+                abi.encodeWithSignature("transfer(address,uint256)", to, amount)
+            );
+            require(ok && (ret.length == 0 || abi.decode(ret, (bool))), "ERC20 transfer failed");
+        }
         emit FeesWithdrawn(currency, to, amount);
     }
 
-    /// @notice PoolManager unlock callback. Called by manager.unlock() during withdrawFees.
-    function unlockCallback(bytes calldata data) external returns (bytes memory) {
-        if (msg.sender != address(poolManager)) revert NotPoolManager();
-        (Currency currency, address to, uint256 amount) = abi.decode(data, (Currency, address, uint256));
-        poolManager.take(currency, to, amount);
-        return "";
-    }
+    receive() external payable {}
 
     // -------- hook entry point --------
 
@@ -94,33 +98,29 @@ contract ComradeHook is IHooks, ISeedSource {
             abi.encode(currentSeed, swapCount, block.prevrandao, block.timestamp, block.number)
         );
 
-        // Compute fee on the OUTPUT side (unspecified currency).
-        // For exactInput swap: amountSpecified < 0 (paid in), unspecified is the output amount.
-        // For exactOutput swap: amountSpecified > 0 (received), unspecified is the input.
-        // We want fee on what flowed back to the user. Use the absolute output of the swap.
-        int128 unspecifiedDelta;
-        if (params.amountSpecified < 0) {
-            // exactInput: unspecified = amount1 if zeroForOne else amount0 (the side user receives)
-            unspecifiedDelta = params.zeroForOne ? delta.amount1() : delta.amount0();
-        } else {
-            // exactOutput: unspecified = amount0 if zeroForOne else amount1 (the side user pays)
-            unspecifiedDelta = params.zeroForOne ? delta.amount0() : delta.amount1();
-        }
-        uint128 absOut = unspecifiedDelta < 0 ? uint128(-unspecifiedDelta) : uint128(unspecifiedDelta);
-        uint128 fee = uint128((uint256(absOut) * uint256(feeBps)) / 10_000);
-        if (fee == 0) return (IHooks.afterSwap.selector, int128(0));
+        // Canonical Uniswap pattern (matches v4-core FeeTakingHook):
+        // Fee is taken on the unspecified currency = the side opposite the
+        // amountSpecified argument. We compute which currency that is, take
+        // its absolute swap amount, skim feeBps, and `manager.take()` the
+        // real tokens out to the hook contract. The matching positive int128
+        // returned below balances the resulting -fee delta to zero.
+        bool specifiedTokenIs0 = (params.amountSpecified < 0 == params.zeroForOne);
+        (Currency feeCurrency, int128 swapAmount) = specifiedTokenIs0
+            ? (key.currency1, delta.amount1())
+            : (key.currency0, delta.amount0());
+        if (swapAmount < 0) swapAmount = -swapAmount;
 
-        // Pre-emptively mint a 6909 claim for the fee in the unspecified currency.
-        // This produces a -fee delta on the hook NOW, and the +fee delta returned
-        // below cancels it — net zero, no CurrencyNotSettled at unlock close.
-        // The hook owner sweeps via withdrawFees(), which burns the claim and
-        // takes real tokens out.
-        Currency feeCurrency = params.zeroForOne
-            ? (params.amountSpecified < 0 ? key.currency1 : key.currency0)
-            : (params.amountSpecified < 0 ? key.currency0 : key.currency1);
-        poolManager.mint(address(this), feeCurrency.toId(), fee);
+        uint256 feeAmount = uint128(swapAmount) * uint256(feeBps) / 10_000;
+        if (feeAmount == 0) return (IHooks.afterSwap.selector, int128(0));
 
-        return (IHooks.afterSwap.selector, int128(fee));
+        poolManager.take(feeCurrency, address(this), feeAmount);
+        return (IHooks.afterSwap.selector, _toInt128(feeAmount));
+    }
+
+    /// @dev SafeCast for fee → int128 — defends against pathological large swaps.
+    function _toInt128(uint256 v) private pure returns (int128) {
+        require(v <= uint128(type(int128).max), "fee too large");
+        return int128(uint128(v));
     }
 
     // -------- disabled hooks --------

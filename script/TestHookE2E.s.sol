@@ -62,7 +62,7 @@ contract TestHookE2E is Script {
             require(address(hook) == predicted, "hook addr mismatch");
             console2.log("hook deployed:   ", address(hook));
         } else {
-            hook = ComradeHook(predicted);
+            hook = ComradeHook(payable(predicted));
             console2.log("hook reused:     ", address(hook));
         }
 
