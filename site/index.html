@@ -692,20 +692,26 @@ function approxQuote(n) {
   return tradeMode === "buy" ? (n / ETH_USD) * (1 + fee) : (n / ETH_USD) * (1 - fee);
 }
 
+let quoteDebounce = null;
 function updateTradeQuote() {
   const n = parseInt($("trade-amount-in").value, 10);
   if (!n || n <= 0) { $("trade-amount-out").value = ""; liveEthCost = null; return; }
   // Show approx instantly so the field never looks empty
-  $("trade-amount-out").value = approxQuote(n).toPrecision(6) + " ETH (estimating…)";
+  $("trade-amount-out").value = approxQuote(n).toPrecision(6) + " ETH (anchor estimate)";
   liveEthCost = null;
-  fetchLiveQuote(n).catch(() => { /* keep approx */ });
+  // Debounce live quote — wait 500ms after typing stops before hitting RPC
+  if (quoteDebounce) clearTimeout(quoteDebounce);
+  quoteDebounce = setTimeout(() => {
+    fetchLiveQuote(n).catch(() => { /* keep approx */ });
+  }, 500);
 }
 
 async function fetchLiveQuote(n) {
-  // Simulate the actual call against ComradeSwap with massive slippage so the
-  // contract returns the real cost without the InsufficientOutput check tripping.
-  const HUGE = 100n * (10n ** 18n);  // 100 ETH max — never trips
-  const ZERO = 1n;                    // accept any output for sell
+  // Simulate against ComradeSwap with maxIn = approx × 5 (covers up to 5x
+  // anchor price drift). Realistic enough that the wallet/RPC won't choke.
+  const approx = approxQuote(n);
+  const maxIn = BigInt(Math.floor(approx * 5 * 1e18));
+  const ZERO = 1n;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
   const amountWei = BigInt(n) * (10n ** 18n);
 
@@ -713,9 +719,9 @@ async function fetchLiveQuote(n) {
   if (tradeMode === "buy") {
     data = "0x" + SEL_BUY
       + bigToHex(amountWei).slice(2).padStart(64, "0")
-      + bigToHex(HUGE).slice(2).padStart(64, "0")
+      + bigToHex(maxIn).slice(2).padStart(64, "0")
       + bigToHex(deadline).slice(2).padStart(64, "0");
-    value = bigToHex(HUGE);
+    value = bigToHex(maxIn);
   } else {
     data = "0x" + SEL_SELL
       + bigToHex(amountWei).slice(2).padStart(64, "0")
