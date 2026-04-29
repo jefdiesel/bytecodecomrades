@@ -8,6 +8,8 @@ The collection is built as an **ERC-20/ERC-721 hybrid (404)** so each whole COMR
 
 A homage to [Call Data Comrades](https://callcomrades.xyz/) (CC0): we use the original CDC trait sprite library, with rarity weights matching CDC's actual distribution from 9,962 items.
 
+**Rules on-chain, not goodwill.** The deployer keeps zero BCC after launch — full 10,000 supply seeded into LP positions and **the LP NFTs are transferred to a permanent locker contract**. Treasury earns ongoing revenue only from per-swap hook fees + claim/unclaim fees. There is no path in any contract for the deployer to remove principal liquidity, mint themselves NFTs, or extract beyond the documented fee streams. Anyone reading the source confirms.
+
 ---
 
 ## How a Comrade gets its art
@@ -79,10 +81,21 @@ A single soulbound NFT (`ComradeGenesis`), auto-minted at deploy to the wallet t
 The pool is COMRADE/WETH at the 0.3% tier. The hook (`ComradeHook`) implements `afterSwap` with `RETURNS_DELTA`:
 
 - Re-rolls the on-chain seed every swap (every transaction drives entropy)
-- Skims **0.1%** of the swap output as protocol fee, accumulated as ERC-6909 claim tokens
-- Owner sweeps via `withdrawFees(currency, recipient, amount)`
+- Skims **0.1%** of the swap output as protocol fee
+- Pattern matches Uniswap's canonical `FeeTakingHook` reference: `take()` real tokens directly into the hook contract; the matching positive `int128` returned cancels the resulting delta to zero
+- Owner sweeps via `withdrawFees(currency, to, amount)` — straight transfer, no unlock dance
 
-The `afterSwap` call mints its 6909 claim in-line so the unlock closes cleanly with zero unsettled deltas. Caught and fixed before mainnet during e2e testing on Sepolia.
+---
+
+## Locked LP
+
+All 10,000 BCC at launch are deposited into the v4 PositionManager as three concentrated-liquidity NFTs (the launch curve), and **transferred to `ComradeLPLocker`** at deploy time. The locker contract has no `removeLiquidity`, no NFT transfer, no admin override, no upgradeability — anyone reading the ~50-line source confirms there's zero rug path.
+
+What it does have:
+
+- `collectFees(tokenId, currency0, currency1)` — public, callable by anyone, pays out only to the **immutable** `feeRecipient` address set at construction. Uses the canonical v4 fee-collect pattern (`DECREASE_LIQUIDITY` of zero + `TAKE_PAIR`).
+
+So the LP earns 0.3% pool fees forever, those fees are extractable to the treasury, but the principal is permanent. Combined with the hook fee (0.1%), the project has two ongoing revenue streams without holding a single BCC token.
 
 ---
 
@@ -153,15 +166,18 @@ CDC has no mutual-exclusion rules between traits — every trait can co-occur wi
 
 ---
 
-## Fees
+## Revenue model
 
-| Fee | Default | Recipient | Purpose |
+The treasury holds zero BCC after launch. All ongoing revenue comes from fees:
+
+| Fee | Amount | Where it comes from | Recipient |
 |---|---|---|---|
-| Swap (afterSwap hook) | 0.1% of output | Hook owner | Per-swap protocol fee |
-| Claim | 0.001111 ETH | Treasury | Wrap into permanent ERC-721 |
-| Unclaim | 0.0069 ETH | Treasury | Unwrap back to 404 (moat against art destruction) |
+| Hook fee | 0.1% of swap output | Every swap (afterSwap) | Hook owner |
+| Pool fee | 0.3% of swap volume | Every swap (Uniswap v4 LP fee) | LP locker, withdrawable to treasury |
+| Claim | 0.001111 ETH | Each `claim()` call | Treasury |
+| Unclaim | 0.0069 ETH | Each `unclaim()` call | Treasury |
 
-All fees adjustable by owner via setter functions.
+Owner can adjust claim/unclaim fees via setters but cannot mint themselves Comrades or remove LP principal. The `feeRecipient` on the locker is **immutable** — set once at deploy, never changeable.
 
 ---
 
@@ -179,22 +195,35 @@ forge test --match-test test_render_item_zero_to_disk -vv
 python3 data/gen_sprite_sol.py
 ```
 
-### Deploy
+### Deploy (mainnet)
 
 ```bash
-# Full stack — sprite chunks, taxonomy, renderer, bloom, hook (CREATE2 salt-mined),
-# Comrade404, Genesis. Deploys defensively: reverts if BCC's predicted address >= WETH.
+# 1. Full contract stack — sprite chunks, renderer, bloom, hook (CREATE2 salt-mined),
+#    Comrade404, ComradeClaimed, Genesis. Reverts if BCC's predicted address >= WETH.
 forge script script/DeployComrade.s.sol \
-  --rpc-url $RPC --private-key $DEPLOY_PRIVATE_KEY --broadcast
+  --rpc-url $MAINNET_RPC --private-key $DEPLOY_PRIVATE_KEY --broadcast
 
-# Initialize the v4 pool with the weighted-curve LP plan ($1 → $1111).
-# PAIR must be WETH (not native ETH) so BCC = token0.
-COMRADE=<bcc-addr> PAIR=<weth-addr> POOL_MANAGER=<v4-pm> HOOK=<hook-addr> ETH_USD=3000 \
+# 2. Initialize the v4 pool. PAIR must be WETH so BCC = token0.
+COMRADE=<bcc-addr> \
+PAIR=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \
+POOL_MANAGER=0x000000000004444c5dc75cB358380D2e3dE08A90 \
+HOOK=<hook-addr> ETH_USD=3000 \
 forge script script/InitComradePool.s.sol \
-  --rpc-url $RPC --private-key $DEPLOY_PRIVATE_KEY --broadcast
+  --rpc-url $MAINNET_RPC --private-key $DEPLOY_PRIVATE_KEY --broadcast
 
-# Add LP positions via Uniswap UI using the printed (tickLower, tickUpper, BCC amount).
+# 3. Seed the launch curve via PositionManager + lock.
+#    Mints 3 LP NFTs (7125 + 1710 + 1165 = 10,000 BCC), transfers to ComradeLPLocker.
+COMRADE=<bcc-addr> \
+POOL_MANAGER=0x000000000004444c5dc75cB358380D2e3dE08A90 \
+POSITION_MANAGER=0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e \
+HOOK=<hook-addr> \
+WETH=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \
+FEE_RECIPIENT=<treasury-wallet> \
+forge script script/SeedLaunchLPMainnet.s.sol \
+  --rpc-url $MAINNET_RPC --private-key $DEPLOY_PRIVATE_KEY --broadcast
 ```
+
+After step 3: deployer holds zero BCC, the locker holds three permanent LP NFTs, and pool fees are claimable via `locker.collectFees(tokenId, c0, c1)` to the treasury. To buy your own Comrades on launch day, send ETH to the swap router like any other user.
 
 ### Site
 
