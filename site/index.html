@@ -735,12 +735,13 @@ async function fetchLiveQuote(n) {
     }
   }
 
-  // Use eth_call with from=walletAddr (or zero addr for view) so static-call simulation works
+  // Always quote from 0x0 — RPC providers treat it as having infinite balance,
+  // so the huge-value simulation bypasses the connected wallet's actual balance.
   const r = await fetch(rpcUrl(CHAIN), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       jsonrpc:"2.0", id:1, method:"eth_call",
-      params:[{ from: walletAddr || "0x0000000000000000000000000000000000000001", to: SWAP_CONTRACT, data, value }, "latest"]
+      params:[{ from: "0x0000000000000000000000000000000000000000", to: SWAP_CONTRACT, data, value }, "latest"]
     }),
   });
   const j = await r.json();
