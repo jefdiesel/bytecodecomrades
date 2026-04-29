@@ -40,6 +40,10 @@ contract ComradeRenderer {
     /// Net result: ~0.3% of Comrades have an art bg (≈3 per 1k).
     uint16 internal constant ART_BG_KEEP_BPS = 133;
 
+    /// @dev Blacklisted background sprite ids — never appear in mints.
+    /// 0 = AUX Flow (visually conflicts too often).
+    uint16 internal constant AUX_FLOW_BG = 0;
+
     function pick(bytes32 seed) public view returns (uint16[] memory ids) {
         // First pass: which categories are included.
         // Relics (cat 8) is permanently excluded — visually fights with face traits
@@ -73,14 +77,23 @@ contract ComradeRenderer {
 
         // Art-background rarity gate: most picked art backgrounds get re-rolled
         // to a solid color. Solid bgs are sprite ids {3..8, 11..13}; everything
-        // else in cat 0 is an "art" bg.
-        if (_isArtBackground(pickedIds[0])) {
-            uint16 gate = uint16(uint256(keccak256(abi.encode(seed, "artbg-gate"))));
-            if (uint256(gate) * 10000 >= uint256(ART_BG_KEEP_BPS) * 65536) {
+        // else in cat 0 is an "art" bg. AUX Flow (id 0) is always re-rolled.
+        bool bgIsAux = (pickedIds[0] == AUX_FLOW_BG);
+        bool bgIsArt = _isArtBackground(pickedIds[0]);
+        if (bgIsAux || bgIsArt) {
+            bool forceReroll = bgIsAux;
+            if (!forceReroll) {
+                uint16 gate = uint16(uint256(keccak256(abi.encode(seed, "artbg-gate"))));
+                forceReroll = uint256(gate) * 10000 >= uint256(ART_BG_KEEP_BPS) * 65536;
+            }
+            if (forceReroll) {
                 for (uint8 attempt = 0; attempt < 8; attempt++) {
                     uint256 rr = uint256(keccak256(abi.encode(seed, "bg-resolid", attempt)));
                     uint16 candidate = taxonomy.pickValue(0, rr);
-                    if (!_isArtBackground(candidate)) { pickedIds[0] = candidate; break; }
+                    if (candidate != AUX_FLOW_BG && !_isArtBackground(candidate)) {
+                        pickedIds[0] = candidate;
+                        break;
+                    }
                 }
             }
         }
