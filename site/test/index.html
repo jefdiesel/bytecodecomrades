@@ -22,13 +22,20 @@
   .toolbar button:disabled { background:#333; color:#666; cursor:not-allowed; }
   .progress { color:var(--muted); font-size:11px; }
   .grid {
-    display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:6px;
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px;
   }
-  .c { background:#000; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .c { background:var(--card); border:1px solid var(--border); border-radius:4px; overflow:hidden; display:flex; flex-direction:column; }
   .img { aspect-ratio:1; image-rendering:pixelated; background:#000; }
   .img svg { width:100%!important; height:100%!important; display:block; image-rendering:pixelated; image-rendering:crisp-edges; }
   .img .placeholder { display:flex; align-items:center; justify-content:center; height:100%; color:#444; font-size:9px; }
-  .lbl { padding:4px; text-align:center; font-size:9px; color:var(--muted); }
+  .lbl { padding:4px 6px; font-size:9px; color:var(--accent); border-bottom:1px solid var(--border); }
+  .traits { padding:6px; font-size:9px; line-height:1.5; color:var(--muted); flex:1; }
+  .traits .row { display:flex; gap:4px; }
+  .traits .k { color:#555; min-width:34px; flex-shrink:0; text-transform:uppercase; }
+  .traits .v { color:var(--fg); word-break:break-word; }
+  .filter { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  .filter input { background:#000; color:var(--fg); border:1px solid var(--border); padding:6px 10px; font:inherit; font-size:11px; border-radius:4px; flex:1; min-width:200px; max-width:400px; }
+  .c.dim { opacity:0.15; }
   a { color:var(--accent); }
 </style>
 </head>
@@ -42,6 +49,10 @@
     <span class="progress" style="margin-left:auto;">
       <a href="/" style="color:var(--accent);">← back to viewer</a>
     </span>
+  </div>
+  <div class="filter">
+    <input id="filter" placeholder="filter by trait name (e.g. 'Bubblegum', 'Royal Purple', 'Mohawk')">
+    <span class="progress" id="filter-status"></span>
   </div>
   <div class="grid" id="grid"></div>
 </div>
@@ -114,20 +125,56 @@ function renderSvg(parent, img) {
   else { const el = document.createElement("img"); el.src = img; parent.appendChild(el); }
 }
 
+// Map full category names → short labels for compact display
+const CAT_SHORT = {
+  "Background": "BG",
+  "Type": "Type",
+  "Skin Stuff": "Skin",
+  "Cloths": "Cloth",
+  "Audio Indexer Derivations": "Audio",
+  "Mouth": "Mouth",
+  "Eyes": "Eyes",
+  "Head": "Head",
+  "Relics": "Relic",
+};
+
+let allCells = [];  // {cell, traitsLower} — for filter
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+function renderTraits(parent, attrs) {
+  parent.innerHTML = "";
+  for (const a of attrs || []) {
+    const k = CAT_SHORT[a.trait_type] || a.trait_type;
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="k">${escHtml(k)}</span><span class="v">${escHtml(a.value)}</span>`;
+    parent.appendChild(row);
+  }
+}
+
 async function reroll() {
   $("reroll").disabled = true;
   const grid = $("grid");
   grid.innerHTML = "";
-  // Pre-create empty cells so layout is stable as cells fill in
+  allCells = [];
+
   const seeds = Array.from({length: COUNT}, () => randomBytes32());
-  const cells = seeds.map((seed, i) => {
+  const refs = seeds.map((seed, i) => {
     const cell = document.createElement("div"); cell.className = "c";
     const wrap = document.createElement("div"); wrap.className = "img";
     wrap.innerHTML = '<div class="placeholder">…</div>';
     const lbl = document.createElement("div"); lbl.className = "lbl"; lbl.textContent = "#" + (i+1);
-    cell.appendChild(wrap); cell.appendChild(lbl);
+    const traits = document.createElement("div"); traits.className = "traits";
+    traits.textContent = "loading…";
+    cell.appendChild(lbl);
+    cell.appendChild(wrap);
+    cell.appendChild(traits);
     grid.appendChild(cell);
-    return wrap;
+    allCells.push({ cell, traitsLower: "" });
+    return { wrap, traits };
   });
 
   let done = 0;
@@ -138,19 +185,39 @@ async function reroll() {
       const data = "0x" + SEL_TOKEN_URI + encU256(idx) + encBytes32(seed);
       const r = await ethCall(RENDERER, data);
       const meta = parseTokenURI(decodeString(r));
-      renderSvg(cells[idx], meta.image);
+      renderSvg(refs[idx].wrap, meta.image);
+      renderTraits(refs[idx].traits, meta.attributes);
+      // Cache lowercased trait blob for filter matching
+      allCells[idx].traitsLower = (meta.attributes || []).map(a => `${a.trait_type}:${a.value}`).join(" ").toLowerCase();
     } catch (e) {
-      cells[idx].innerHTML = '<div class="placeholder">err</div>';
+      refs[idx].wrap.innerHTML = '<div class="placeholder">err</div>';
+      refs[idx].traits.textContent = "err";
     }
     done++;
     $("progress").textContent = `${done} / ${COUNT}`;
   });
 
-  $("progress").textContent = `${COUNT} / ${COUNT} — done. Reload for fresh rolls.`;
+  $("progress").textContent = `${COUNT} / ${COUNT} loaded`;
   $("reroll").disabled = false;
+  applyFilter();
+}
+
+function applyFilter() {
+  const q = $("filter").value.trim().toLowerCase();
+  let shown = 0;
+  for (const { cell, traitsLower } of allCells) {
+    if (!q || traitsLower.includes(q)) {
+      cell.classList.remove("dim");
+      shown++;
+    } else {
+      cell.classList.add("dim");
+    }
+  }
+  $("filter-status").textContent = q ? `${shown} match "${q}"` : "";
 }
 
 $("reroll").onclick = reroll;
+$("filter").addEventListener("input", applyFilter);
 window.addEventListener("DOMContentLoaded", () => setTimeout(reroll, 100));
 </script>
 </body>
