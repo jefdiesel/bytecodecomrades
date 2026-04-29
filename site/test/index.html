@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BCC test gallery — 100 fresh rolls</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  :root { --bg:#0a0a0a; --fg:#e8e8e8; --muted:#888; --accent:#c3ff00; --border:#222; --card:#141414; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--fg); font:13px ui-monospace,"JetBrains Mono",Menlo,monospace; margin:0; padding:24px; }
+  .wrap { max-width:1400px; margin:0 auto; }
+  h1 { color:var(--accent); font-size:22px; margin:0 0 4px; letter-spacing:2px; }
+  .sub { color:var(--muted); font-size:12px; margin:0 0 16px; }
+  .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:16px; }
+  .toolbar button {
+    background:var(--accent); color:#000; border:none; cursor:pointer;
+    font:inherit; font-size:11px; font-weight:600; text-transform:uppercase;
+    letter-spacing:2px; padding:8px 16px; border-radius:4px;
+  }
+  .toolbar button:hover { filter:brightness(1.1); }
+  .toolbar button:disabled { background:#333; color:#666; cursor:not-allowed; }
+  .progress { color:var(--muted); font-size:11px; }
+  .grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:6px;
+  }
+  .c { background:#000; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .img { aspect-ratio:1; image-rendering:pixelated; background:#000; }
+  .img svg { width:100%!important; height:100%!important; display:block; image-rendering:pixelated; image-rendering:crisp-edges; }
+  .img .placeholder { display:flex; align-items:center; justify-content:center; height:100%; color:#444; font-size:9px; }
+  .lbl { padding:4px; text-align:center; font-size:9px; color:var(--muted); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>BYTECODE COMRADES — TEST GALLERY</h1>
+  <p class="sub">100 procedural Comrades, fresh seeds on every reload. Art rendered live by the on-chain renderer (no caching). Reload to roll new ones.</p>
+  <div class="toolbar">
+    <button id="reroll">Reroll 100</button>
+    <span class="progress" id="progress">starting…</span>
+    <span class="progress" style="margin-left:auto;">
+      <a href="/" style="color:var(--accent);">← back to viewer</a>
+    </span>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+// Hardwired renderer (Sepolia, latest deploy with canonical hook + alpha + cross-chunk)
+const CHAIN = "eth-sepolia";
+const RENDERER = "0x0250f1a96539a54ca9e8873185c5072e9bb7666a";
+const SEL_TOKEN_URI = "f67b80d8";  // tokenURI(uint256,bytes32) on the renderer
+const COUNT = 100;
+const CONCURRENCY = 12;
+
+const $ = (id) => document.getElementById(id);
+
+function rpcUrl(chain) { return `/api/rpc?chain=${encodeURIComponent(chain)}`; }
+
+function encU256(n) { return BigInt(n).toString(16).padStart(64, "0"); }
+function encBytes32(h) { return h.slice(2).padStart(64, "0"); }
+
+async function ethCall(to, data) {
+  const r = await fetch(rpcUrl(CHAIN), {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc:"2.0", method:"eth_call", params:[{to,data},"latest"], id:1 }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "rpc");
+  return j.result;
+}
+
+function decodeString(hex) {
+  if (hex.startsWith("0x")) hex = hex.slice(2);
+  const len = parseInt(hex.slice(64,128),16);
+  const dataHex = hex.slice(128, 128 + len*2);
+  const bytes = new Uint8Array(len);
+  for (let i=0;i<len;i++) bytes[i] = parseInt(dataHex.slice(i*2,i*2+2),16);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function parseTokenURI(uri) {
+  if (uri.startsWith("data:application/json;utf8,")) return JSON.parse(uri.slice("data:application/json;utf8,".length));
+  if (uri.startsWith("data:application/json;base64,")) return JSON.parse(atob(uri.slice("data:application/json;base64,".length)));
+  throw new Error("bad uri");
+}
+
+function randomBytes32() {
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  return "0x" + Array.from(buf).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+async function pmap(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      try { out[idx] = await fn(items[idx], idx); }
+      catch (e) { out[idx] = { __error: e.message || String(e) }; }
+    }
+  }
+  await Promise.all(Array.from({length:n}, worker));
+  return out;
+}
+
+function renderSvg(parent, img) {
+  parent.innerHTML = "";
+  if (!img) { parent.innerHTML = '<div class="placeholder">no image</div>'; return; }
+  if (img.startsWith("data:image/svg+xml;utf8,")) parent.innerHTML = img.slice("data:image/svg+xml;utf8,".length);
+  else if (img.startsWith("data:image/svg+xml;base64,")) parent.innerHTML = atob(img.slice("data:image/svg+xml;base64,".length));
+  else { const el = document.createElement("img"); el.src = img; parent.appendChild(el); }
+}
+
+async function reroll() {
+  $("reroll").disabled = true;
+  const grid = $("grid");
+  grid.innerHTML = "";
+  // Pre-create empty cells so layout is stable as cells fill in
+  const seeds = Array.from({length: COUNT}, () => randomBytes32());
+  const cells = seeds.map((seed, i) => {
+    const cell = document.createElement("div"); cell.className = "c";
+    const wrap = document.createElement("div"); wrap.className = "img";
+    wrap.innerHTML = '<div class="placeholder">…</div>';
+    const lbl = document.createElement("div"); lbl.className = "lbl"; lbl.textContent = "#" + (i+1);
+    cell.appendChild(wrap); cell.appendChild(lbl);
+    grid.appendChild(cell);
+    return wrap;
+  });
+
+  let done = 0;
+  $("progress").textContent = `0 / ${COUNT}`;
+
+  await pmap(seeds, CONCURRENCY, async (seed, idx) => {
+    try {
+      const data = "0x" + SEL_TOKEN_URI + encU256(idx) + encBytes32(seed);
+      const r = await ethCall(RENDERER, data);
+      const meta = parseTokenURI(decodeString(r));
+      renderSvg(cells[idx], meta.image);
+    } catch (e) {
+      cells[idx].innerHTML = '<div class="placeholder">err</div>';
+    }
+    done++;
+    $("progress").textContent = `${done} / ${COUNT}`;
+  });
+
+  $("progress").textContent = `${COUNT} / ${COUNT} — done. Reload for fresh rolls.`;
+  $("reroll").disabled = false;
+}
+
+$("reroll").onclick = reroll;
+window.addEventListener("DOMContentLoaded", () => setTimeout(reroll, 100));
+</script>
+</body>
+</html>
