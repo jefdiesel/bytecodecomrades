@@ -44,6 +44,13 @@ contract ComradeRenderer {
     /// 0 = AUX Flow (visually conflicts too often).
     uint16 internal constant AUX_FLOW_BG = 0;
 
+    /// @dev "Minimal" gate. When fires, post-process to keep BG + Type + Eyes +
+    /// at most one optional category (drop the rest). Lifts the 4-trait floor:
+    /// natural CDC weights almost always produce 5+ traits because Cloths,
+    /// Mouth and Head fire together at high presence.
+    /// 1000 bps (10%) → ~16% of Comrades end up with exactly 4 visible traits.
+    uint16 internal constant MINIMAL_GATE_BPS = 1000;
+
     function pick(bytes32 seed) public view returns (uint16[] memory ids) {
         // First pass: which categories are included.
         // Relics (cat 8) is permanently excluded — visually fights with face traits
@@ -93,6 +100,28 @@ contract ComradeRenderer {
                     if (candidate != AUX_FLOW_BG && !_isArtBackground(candidate)) {
                         pickedIds[0] = candidate;
                         break;
+                    }
+                }
+            }
+        }
+
+        // Minimal gate: occasionally trim down to BG + Type + Eyes + 1 optional.
+        {
+            uint16 mg = uint16(uint256(keccak256(abi.encode(seed, "minimal-gate"))));
+            if (uint256(mg) * 10000 < uint256(MINIMAL_GATE_BPS) * 65536) {
+                uint8[5] memory opts = [uint8(2), 3, 4, 5, 7];
+                uint8 onCount = 0;
+                uint8[5] memory onCats;
+                for (uint8 k = 0; k < 5; k++) {
+                    if (include[opts[k]]) { onCats[onCount++] = opts[k]; }
+                }
+                if (onCount >= 2) {
+                    uint256 sel = uint256(keccak256(abi.encode(seed, "minimal-keep"))) % onCount;
+                    for (uint8 k = 0; k < onCount; k++) {
+                        if (k != sel) {
+                            include[onCats[k]] = false;
+                            count--;
+                        }
                     }
                 }
             }
