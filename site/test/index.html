@@ -58,10 +58,13 @@
 </div>
 
 <script>
-// Hardwired renderer (Sepolia, latest deploy with canonical hook + alpha + cross-chunk)
+// We resolve the live renderer dynamically from Comrade404.renderer() so /test
+// always tracks the latest deploy without manual bumps.
 const CHAIN = "eth-sepolia";
-const RENDERER = "0x0250f1a96539a54ca9e8873185c5072e9bb7666a";
-const SEL_TOKEN_URI = "f67b80d8";  // tokenURI(uint256,bytes32) on the renderer
+const COMRADE404 = "0xe1e561828a3ec99c96c8a9bbbcc7b6c5e554b8b6";
+const SEL_RENDERER = "8ada6b0f";    // renderer() on Comrade404
+const SEL_TOKEN_URI = "f67b80d8";   // tokenURI(uint256,bytes32) on the renderer
+let   RENDERER = null;              // resolved at load
 const COUNT = 100;
 const CONCURRENCY = 12;
 
@@ -155,11 +158,23 @@ function renderTraits(parent, attrs) {
   }
 }
 
+async function resolveRenderer() {
+  const r = await ethCall(COMRADE404, "0x" + SEL_RENDERER);
+  // returndata is a left-padded address (32 bytes). Take the last 20.
+  return "0x" + r.slice(2).slice(-40);
+}
+
 async function reroll() {
   $("reroll").disabled = true;
   const grid = $("grid");
   grid.innerHTML = "";
   allCells = [];
+
+  if (!RENDERER) {
+    $("progress").textContent = "resolving renderer…";
+    try { RENDERER = await resolveRenderer(); }
+    catch (e) { $("progress").textContent = "renderer lookup failed: " + e.message; $("reroll").disabled = false; return; }
+  }
 
   const seeds = Array.from({length: COUNT}, () => randomBytes32());
   const refs = seeds.map((seed, i) => {

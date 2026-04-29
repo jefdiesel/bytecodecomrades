@@ -8,6 +8,7 @@ import {ComradeTaxonomy}     from "../src/ComradeTaxonomy.sol";
 
 interface IComrade404Set {
     function setRenderer(address) external;
+    function setClaimedRenderer(address) external;
 }
 
 /// @notice Deploy a new ComradeRenderer pointing at the existing sprite data + taxonomy,
@@ -28,6 +29,7 @@ contract RedeployRenderer is Script {
             ComradeTaxonomy(taxonomy)
         );
         IComrade404Set(token).setRenderer(address(r));
+        IComrade404Set(token).setClaimedRenderer(address(r));
         vm.stopBroadcast();
 
         console2.log("new renderer:", address(r));

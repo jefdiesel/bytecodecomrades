@@ -27,11 +27,27 @@ contract ComradeRenderer {
     /// @notice Procedural pick: derive trait sprite IDs from a seed via the
     /// CDC-frequency-weighted taxonomy. Returns at least 3 ids (BG, Type, Eyes
     /// always required) and up to 9 ids (one per visual category).
+    /// @dev Eyes that are full-face masks. When picked, the Mouth category is
+    /// suppressed so we don't render a mouth peeking through the mask.
+    uint16 internal constant DEATH_CROSS_MASK     = 189;
+    uint16 internal constant DRAGON_MASK          = 191;
+    uint16 internal constant LORD_FOCKER_MASK     = 192;
+    uint16 internal constant SEEDPHRASE_MASK      = 227;
+
+    /// @dev Art-background rarity gate. Art backgrounds (non-solid colors)
+    /// feel loud at CDC-weight (~23%); we want them as a rare treat.
+    /// Keep ~1.33% of art-bg picks; the rest get re-rolled to a solid color.
+    /// Net result: ~0.3% of Comrades have an art bg (≈3 per 1k).
+    uint16 internal constant ART_BG_KEEP_BPS = 133;
+
     function pick(bytes32 seed) public view returns (uint16[] memory ids) {
-        // Two-pass: first determine which categories are included, then pick values.
+        // First pass: which categories are included.
+        // Relics (cat 8) is permanently excluded — visually fights with face traits
+        // and adds noise without taste. Decision: no relics in BCC.
         bool[9] memory include;
         uint8 count = 0;
         for (uint8 cat = 0; cat < 9; cat++) {
+            if (cat == 8) continue;  // skip Relics
             uint16 r = uint16(uint256(keccak256(abi.encode(seed, "incl", cat))));
             if (taxonomy.shouldInclude(cat, r)) {
                 include[cat] = true;
@@ -39,10 +55,38 @@ contract ComradeRenderer {
             }
         }
 
-        // Draw order: BG, Type, Skin, Cloths, Head, Audio, Mouth, Eyes, Relics.
-        // Head paints first among the face layers so big hats/hair don't cover
-        // audio gear, the mouth, or glasses. Eyes paint last so glasses sit
-        // on top of everything.
+        // Second pass: pick value for each included category.
+        uint16[9] memory pickedIds;
+        for (uint8 cat = 0; cat < 9; cat++) {
+            if (!include[cat]) continue;
+            uint256 r = uint256(keccak256(abi.encode(seed, "val", cat)));
+            pickedIds[cat] = taxonomy.pickValue(cat, r);
+        }
+
+        // Exclusion rules: full-face Eye masks suppress Mouth.
+        if (include[6]) {
+            uint16 e = pickedIds[6];
+            if (e == DEATH_CROSS_MASK || e == DRAGON_MASK || e == LORD_FOCKER_MASK || e == SEEDPHRASE_MASK) {
+                if (include[5]) { include[5] = false; count--; }
+            }
+        }
+
+        // Art-background rarity gate: most picked art backgrounds get re-rolled
+        // to a solid color. Solid bgs are sprite ids {3..8, 11..13}; everything
+        // else in cat 0 is an "art" bg.
+        if (_isArtBackground(pickedIds[0])) {
+            uint16 gate = uint16(uint256(keccak256(abi.encode(seed, "artbg-gate"))));
+            if (uint256(gate) * 10000 >= uint256(ART_BG_KEEP_BPS) * 65536) {
+                for (uint8 attempt = 0; attempt < 8; attempt++) {
+                    uint256 rr = uint256(keccak256(abi.encode(seed, "bg-resolid", attempt)));
+                    uint16 candidate = taxonomy.pickValue(0, rr);
+                    if (!_isArtBackground(candidate)) { pickedIds[0] = candidate; break; }
+                }
+            }
+        }
+
+        // Draw order: BG, Type, Skin, Cloths, Head, Audio, Mouth, Eyes.
+        // Relics is in the array but always excluded above.
         uint8[9] memory drawOrder = [uint8(0),1,2,3,7,4,5,6,8];
 
         ids = new uint16[](count);
@@ -50,9 +94,17 @@ contract ComradeRenderer {
         for (uint8 i = 0; i < 9; i++) {
             uint8 cat = drawOrder[i];
             if (!include[cat]) continue;
-            uint256 r = uint256(keccak256(abi.encode(seed, "val", cat)));
-            ids[idx++] = taxonomy.pickValue(cat, r);
+            ids[idx++] = pickedIds[cat];
         }
+    }
+
+    /// @dev Solid-color bg sprite ids are {3,4,5,6,7,8,11,12,13}; the other 13
+    /// background sprites are "art" (illustrated scenes/patterns).
+    function _isArtBackground(uint16 sid) internal pure returns (bool) {
+        if (sid <= 2) return true;                  // 0,1,2
+        if (sid == 9 || sid == 10) return true;     // Macs Noise, Matrix
+        if (sid >= 14 && sid <= 21) return true;    // 14..21
+        return false;                               // solids: 3..8, 11..13
     }
 
     /// @notice Render a procedurally-picked Comrade from a seed.
