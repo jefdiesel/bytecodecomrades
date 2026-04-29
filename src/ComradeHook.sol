@@ -19,8 +19,8 @@ import {ISeedSource} from "./ISeedSource.sol";
 /// Mine via HookMiner before deploy (CREATE2 salt).
 contract ComradeHook is IHooks, ISeedSource {
     /// @dev Bumped each redeploy to force fresh CREATE2 bytecode → fresh address.
-    /// Rev 3: switched to canonical Uniswap take()-based fee skim; safer cast.
-    uint256 public constant DEPLOY_REVISION = 3;
+    /// Rev 4: full Sepolia rebuild with canonical pattern.
+    uint256 public constant DEPLOY_REVISION = 4;
 
     IPoolManager public immutable poolManager;
 
