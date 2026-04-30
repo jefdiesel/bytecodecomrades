@@ -36,6 +36,9 @@ import {IComradeClaimed}       from "../src/IComradeClaimed.sol";
 ///   CDC_OG           — owner of CDC #1 (defaults to current snapshot value)
 ///   MAX_COMRADES     — collection cap (default 10000)
 ///   TOKENS_PER_COMRADE — wei per Comrade (default 1e18 — simple 1:1)
+///   HOOK_OWNER       — final owner of ComradeHook (defaults to deployer; set
+///                      to a multisig at mainnet launch so fee withdrawals/fee
+///                      changes aren't a single-EOA-key risk)
 contract DeployComrade is Script {
     address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
@@ -47,6 +50,7 @@ contract DeployComrade is Script {
         address treasury = _envAddrOr("TREASURY", deployer);
         address poolMgr  = _envAddrOr("POOL_MANAGER", _defaultPoolManager(block.chainid));
         address cdcOg    = _envAddrOr("CDC_OG", DEFAULT_CDC_OG);
+        address hookOwner = _envAddrOr("HOOK_OWNER", deployer);
         require(poolMgr != address(0), "POOL_MANAGER not set and no default for chain");
 
         uint256 maxComrades      = _envUintOr("MAX_COMRADES",       10_000);
@@ -116,6 +120,12 @@ contract DeployComrade is Script {
 
         // Genesis: airdrop to CDC #1 owner
         ComradeGenesis genesis = new ComradeGenesis(cdcOg, renderer);
+
+        // Hand off hook ownership last. Skipped if HOOK_OWNER == deployer.
+        if (hookOwner != deployer) {
+            hook.transferOwnership(hookOwner);
+            console2.log("Hook ownership transferred to:", hookOwner);
+        }
 
         vm.stopBroadcast();
 

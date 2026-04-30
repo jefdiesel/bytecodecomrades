@@ -183,6 +183,10 @@
       <input id="trade-amount-in" type="number" min="1" step="1" value="1">
       <label id="trade-out-label" style="margin-top:12px;">Estimated ETH cost</label>
       <input id="trade-amount-out" type="text" readonly placeholder="0.0">
+      <div style="display:flex; justify-content:space-between; gap:8px; margin-top:6px; font-size:10px; color:var(--muted);">
+        <span id="trade-spot">spot: —</span>
+        <span id="trade-impact"></span>
+      </div>
       <label style="margin-top:12px;">Max slippage (%)</label>
       <input id="trade-slippage" type="number" step="0.1" min="0.1" max="50" value="1">
       <button id="trade-btn" disabled>Connect wallet first</button>
@@ -282,7 +286,7 @@ const CHAIN              = "eth-sepolia";
 const BCC_CONTRACT       = "0xe1e561828a3ec99c96c8a9bbbcc7b6c5e554b8b6";
 const CLAIMED_CONTRACT   = "0xf011c12d39e28bd7d8afc7a24d982ac8259b1ece";
 const GENESIS_CONTRACT   = "0x1a1340412d8e2103c2cb7afcbe41fcd81b23f1c4";
-const SWAP_CONTRACT      = "0x6168116eb7dc291344b4afea461c045b2269a50d";
+const SWAP_CONTRACT      = "0xE79A9c400178e89695073045b66c543F227f4354";
 
 // Pool anchor for quote approximations (BCC = $1 at $3k ETH → 3000 BCC per ETH).
 const ETH_USD            = 3000;
@@ -686,6 +690,9 @@ $("trade-tab-sell").onclick = () => setTradeMode("sell");
 
 // Cache the live quote so click handler can use it without re-querying
 let liveEthCost = null;
+// Cached pool spot price (ETH per BCC), refreshed by fetchSpotPrice. Computed
+// from a 1-BCC quote so impact for that probe size is sub-basis-point.
+let spotEthPerBcc = null;
 
 function approxQuote(n) {
   const fee = HOOK_FEE_BPS / 10000;
@@ -760,14 +767,58 @@ async function fetchLiveQuote(n) {
   const ethAmount = Number(result) / 1e18;
   liveEthCost = ethAmount;
   $("trade-amount-out").value = ethAmount.toFixed(6) + " ETH (live)";
+
+  // Price impact: compare effective per-BCC price vs. cached spot. Buy: effective
+  // > spot (you pay more per unit). Sell: effective < spot (you get less). We
+  // express impact as positive percent in either direction.
+  const impactEl = $("trade-impact");
+  if (spotEthPerBcc && n > 0) {
+    const effective = ethAmount / n;
+    const ref = spotEthPerBcc * n;
+    const impactPct = tradeMode === "buy"
+      ? ((ethAmount - ref) / ref) * 100
+      : ((ref - ethAmount) / ref) * 100;
+    if (Number.isFinite(impactPct)) {
+      const sign = impactPct >= 0 ? "+" : "";
+      impactEl.textContent = `impact: ${sign}${impactPct.toFixed(2)}%`;
+      impactEl.style.color = impactPct < 1 ? "var(--muted)" : impactPct < 5 ? "#d6a64a" : "#e06b6b";
+    } else { impactEl.textContent = ""; }
+  } else { impactEl.textContent = ""; }
+}
+
+async function fetchSpotPrice() {
+  // 1-BCC quote with generous maxIn → near-zero-impact estimate of pool spot.
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+  const oneBcc = 10n ** 18n;
+  const maxIn = 10n ** 18n; // 1 ETH ceiling — well above realistic 1-BCC price
+  const data = "0x" + SEL_BUY
+    + bigToHex(oneBcc).slice(2).padStart(64, "0")
+    + bigToHex(maxIn).slice(2).padStart(64, "0")
+    + bigToHex(deadline).slice(2).padStart(64, "0");
+  try {
+    const r = await fetch(rpcUrl(CHAIN), {
+      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc:"2.0", id:1, method:"eth_call",
+        params:[{ from: "0x0000000000000000000000000000000000000000", to: SWAP_CONTRACT, data, value: bigToHex(maxIn) }, "latest"]
+      }),
+    });
+    const j = await r.json();
+    if (j.error || !j.result) { $("trade-spot").textContent = "spot: pool dry"; return; }
+    const ethPerBcc = Number(BigInt(j.result)) / 1e18;
+    spotEthPerBcc = ethPerBcc;
+    $("trade-spot").textContent = `spot: ${ethPerBcc.toFixed(6)} ETH / BCC`;
+  } catch { $("trade-spot").textContent = "spot: —"; }
 }
 
 function decodeSwapError(data) {
   if (!data || data.length < 10) return null;
   const sel = data.slice(0, 10).toLowerCase();
   if (sel === "0x7c9c6e8f") return "exhausted bracket — try smaller amount";
-  if (sel === "0xbb2875c3") return "slippage exceeded — raise tolerance";
+  if (sel === "0xbb2875c3") return "slippage too tight — got less ETH than min";
+  if (sel === "0xde9d3c88") return "slippage too tight — needed more ETH than max";
   if (sel === "0x203d82d8") return "deadline expired";
+  if (sel === "0x29a70758") return "pool returned unexpected delta";
   return null;
 }
 
@@ -962,6 +1013,9 @@ async function waitReceipt(txHash) {
   $("trade-bcc-link").textContent = BCC_CONTRACT;
   $("trade-weth-link").href = `${explorer}/address/${WETH_ADDR}`;
   $("trade-weth-link").textContent = WETH_ADDR;
+  fetchSpotPrice();
+  // Refresh spot every 30s so pool drift is reflected without full reload.
+  setInterval(fetchSpotPrice, 30000);
 })();
 
 // Trade is the default tab — no auto-load needed (the swap UI is static).

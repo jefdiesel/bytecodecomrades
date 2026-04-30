@@ -108,9 +108,12 @@ contract ComradeHook is IHooks, ISeedSource {
         (Currency feeCurrency, int128 swapAmount) = specifiedTokenIs0
             ? (key.currency1, delta.amount1())
             : (key.currency0, delta.amount0());
-        if (swapAmount < 0) swapAmount = -swapAmount;
 
-        uint256 feeAmount = uint128(swapAmount) * uint256(feeBps) / 10_000;
+        // Promote to int256 before negating so |INT128_MIN| can't overflow.
+        int256 absSwap = int256(swapAmount);
+        if (absSwap < 0) absSwap = -absSwap;
+
+        uint256 feeAmount = uint256(absSwap) * uint256(feeBps) / 10_000;
         if (feeAmount == 0) return (IHooks.afterSwap.selector, int128(0));
 
         poolManager.take(feeCurrency, address(this), feeAmount);
