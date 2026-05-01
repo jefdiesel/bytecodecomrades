@@ -16,15 +16,17 @@
   .sub { color: #8a8f99; font-size: 12px; }
   .sub a { color: #6cf; text-decoration: none; }
   .sub a:hover { text-decoration: underline; }
-  #status { color: #8a8f99; font-size: 12px; margin: 0 0 12px; min-height: 16px; }
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px;
+  #status { color: #8a8f99; font-size: 12px; margin: 0 0 12px; min-height: 16px; word-break: break-all; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px;
              font-size: 12px; align-items: center; }
-  .toolbar button { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
+  .toolbar button, .toolbar input { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
                     padding: 5px 10px; border-radius: 3px; cursor: pointer;
                     font: inherit; }
+  .toolbar input { cursor: text; min-width: 380px; }
   .toolbar button:hover { background: #262a32; }
   .toolbar button.on { background: #2a3548; border-color: #3d5277; }
   .toolbar .pill { color: #8a8f99; padding: 5px 8px; }
+  .walletbar { display: flex; gap: 8px; margin: 0 0 16px; align-items: center; flex-wrap: wrap; }
   #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
           gap: 6px; }
   .cell { aspect-ratio: 1; background: #16181d; border-radius: 3px;
@@ -43,7 +45,6 @@
   #sentinel { height: 60px; margin: 24px 0 0; color: #666; text-align: center;
               font-size: 12px; line-height: 60px; }
   .filter-hidden { display: none !important; }
-  /* modal */
   #modal { position: fixed; inset: 0; background: #000c; display: none;
            align-items: center; justify-content: center; padding: 20px; z-index: 10; }
   #modal.on { display: flex; }
@@ -70,6 +71,11 @@
   </div>
 </header>
 <div id="status">connecting…</div>
+<div class="walletbar">
+  <input id="walletInput" placeholder="0x… wallet address" autocomplete="off" spellcheck="false">
+  <button id="walletGo">look up wallet</button>
+  <button id="walletClear" style="display:none">← back to all</button>
+</div>
 <div class="toolbar">
   <button id="filterAll" class="on">all</button>
   <button id="filterAlive">alive</button>
@@ -89,34 +95,78 @@
   </div>
 </div>
 
-<script type="module">
-import { Interface } from "https://esm.sh/ethers@6.13.4";
+<script>
+"use strict";
 
 const RPC   = "/api/rpc?chain=eth-mainnet";
 const TOKEN = "0x44b28991b167582f18ba0259e0173176ca125505";
 const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
 const PAGE_TARGET  = 100;
-const HOLDER_BATCH = 10;
+const HOLDER_BATCH = 8;
 
-const tokenI = new Interface([
-  "function HoldersCount() view returns (uint256)",
-  "function Holder(uint256) view returns (address)",
-  "function UpegsTotalCount() view returns (uint256)",
-  "function OwnerUpegsCount(address) view returns (uint256)",
-  "function OwnerUpegsPage(address,uint256,uint256) view returns (tuple(uint256,uint256)[])"
-]);
-const hookI = new Interface([
-  "function generate(uint256) view returns (string)"
-]);
+// --- precomputed function selectors ---
+const SEL = {
+  HoldersCount:    "0x8c979559",
+  Holder:          "0x1a773210",
+  UpegsTotalCount: "0xd396bbff",
+  OwnerUpegsCount: "0x067b2601",
+  OwnerUpegsPage:  "0x407d4fb4",
+  generate:        "0x4a7dd523"
+};
 
-// ---------- RPC ----------
+// --- ABI helpers (hand-rolled, no ethers) ---
+function pad32(hex) {
+  hex = hex.replace(/^0x/, "").toLowerCase();
+  return hex.padStart(64, "0");
+}
+function uintToHex(n) { return pad32(BigInt(n).toString(16)); }
+function addrToHex(a) { return pad32(a.replace(/^0x/, "").toLowerCase()); }
+
+function encodeUint(n)              { return uintToHex(n); }
+function encodeAddress(a)           { return addrToHex(a); }
+function callOwnerUpegsPage(a,p,s)  { return SEL.OwnerUpegsPage + encodeAddress(a) + encodeUint(p) + encodeUint(s); }
+function callHolder(i)              { return SEL.Holder + encodeUint(i); }
+function callOwnerUpegsCount(a)     { return SEL.OwnerUpegsCount + encodeAddress(a); }
+function callGenerate(seed)         { return SEL.generate + pad32(BigInt(seed).toString(16)); }
+
+function decodeUint(hex)    { return BigInt(hex); }
+function decodeAddress(hex) { return "0x" + hex.replace(/^0x/, "").slice(-40); }
+
+// decode (uint256,uint256)[] returned by OwnerUpegsPage
+function decodeOwnerUpegsPage(hex) {
+  const data = hex.replace(/^0x/, "");
+  if (data.length < 128) return [];
+  // bytes 0..31 = offset (skip), 32..63 = array length
+  const len = parseInt(data.slice(64, 128), 16);
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    const base = 128 + i * 128;
+    const idHex   = data.slice(base, base + 64);
+    const seedHex = data.slice(base + 64, base + 128);
+    out.push({ id: Number(BigInt("0x" + idHex)), seed: BigInt("0x" + seedHex).toString() });
+  }
+  return out;
+}
+
+// decode dynamic string returned by generate()
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  if (data.length < 128) return "";
+  const len = parseInt(data.slice(64, 128), 16);
+  const utf8 = data.slice(128, 128 + len * 2);
+  let s = "";
+  for (let i = 0; i < utf8.length; i += 2) s += String.fromCharCode(parseInt(utf8.slice(i, i + 2), 16));
+  return s;
+}
+
+// --- RPC ---
 let rpcId = 0;
 async function call(to, data) {
   const res = await fetch(RPC, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc:"2.0", id: ++rpcId, method:"eth_call",
-                           params:[{ to, data }, "latest"] })
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method: "eth_call",
+                           params: [{ to, data }, "latest"] })
   });
   const j = await res.json();
   if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
@@ -129,15 +179,14 @@ async function pmap(items, n, fn) {
     while (i < items.length) {
       const k = i++;
       try { out[k] = await fn(items[k], k); }
-      catch (e) { out[k] = { _err: e }; }
+      catch (e) { out[k] = { _err: String(e) }; }
     }
   }));
   return out;
 }
 
-// ---------- IndexedDB archive ----------
-const DB_NAME = "upeg-archive";
-const STORE = "unicorns";
+// --- IndexedDB archive ---
+const DB_NAME = "upeg-archive", STORE = "unicorns";
 function openDB() {
   return new Promise((res, rej) => {
     const r = indexedDB.open(DB_NAME, 1);
@@ -146,56 +195,27 @@ function openDB() {
     r.onerror = () => rej(r.error);
   });
 }
-function dbGetAll(db) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(STORE, "readonly");
-    const r = tx.objectStore(STORE).getAll();
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-}
-function dbPut(db, item) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(item);
-    tx.oncomplete = res;
-    tx.onerror = () => rej(tx.error);
-  });
-}
-function dbBulkPut(db, items) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(STORE, "readwrite");
-    const s = tx.objectStore(STORE);
-    for (const it of items) s.put(it);
-    tx.oncomplete = res;
-    tx.onerror = () => rej(tx.error);
-  });
-}
-function dbUpdate(db, id, patch) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(STORE, "readwrite");
-    const s = tx.objectStore(STORE);
-    const g = s.get(id);
-    g.onsuccess = () => {
-      const cur = g.result;
-      if (!cur) return res();
-      Object.assign(cur, patch);
-      s.put(cur);
-    };
-    tx.oncomplete = res;
-    tx.onerror = () => rej(tx.error);
-  });
-}
-function dbClear(db) {
-  return new Promise((res, rej) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).clear();
-    tx.oncomplete = res;
-    tx.onerror = () => rej(tx.error);
-  });
-}
+function dbGetAll(db) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readonly");
+  const r = tx.objectStore(STORE).getAll();
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+}); }
+function dbBulkPut(db, items) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readwrite");
+  const s = tx.objectStore(STORE);
+  for (const it of items) s.put(it);
+  tx.oncomplete = res;
+  tx.onerror = () => rej(tx.error);
+}); }
+function dbClear(db) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readwrite");
+  tx.objectStore(STORE).clear();
+  tx.oncomplete = res;
+  tx.onerror = () => rej(tx.error);
+}); }
 
-// ---------- DOM ----------
+// --- DOM ---
 const $status = document.getElementById("status");
 const $grid   = document.getElementById("grid");
 const $sent   = document.getElementById("sentinel");
@@ -203,54 +223,66 @@ const $modal  = document.getElementById("modal");
 const $mArt   = document.getElementById("modalArt");
 const $mMeta  = document.getElementById("modalMeta");
 const $counts = document.getElementById("counts");
+const $fAll = document.getElementById("filterAll"),
+      $fAlive = document.getElementById("filterAlive"),
+      $fBurned = document.getElementById("filterBurned"),
+      $export = document.getElementById("export"),
+      $clear = document.getElementById("clearCache"),
+      $wIn = document.getElementById("walletInput"),
+      $wGo = document.getElementById("walletGo"),
+      $wClear = document.getElementById("walletClear");
 
-const $fAll = document.getElementById("filterAll");
-const $fAlive = document.getElementById("filterAlive");
-const $fBurned = document.getElementById("filterBurned");
-const $export = document.getElementById("export");
-const $clear = document.getElementById("clearCache");
-
-// ---------- state ----------
+// --- state ---
 let db;
 let holdersCount = 0, totalEverMinted = 0;
 let nextHolderIdx = 0, totalRendered = 0;
 let loading = false, scanComplete = false;
-let liveAlive = new Set();   // ids confirmed alive in this scan
-let cellsById = new Map();   // id -> {div, record}
+const liveAlive = new Set();
+const cellsById = new Map();
 let filter = "all";
+let walletMode = null; // null or lowercased address
 
 function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
 function fmtTime(t) { return new Date(t).toLocaleString(); }
 
-function openModal({ id, seed, svg, holder, status, firstSeenAt, lastSeenAt }) {
-  $mArt.innerHTML = svg || "";
+function openModal(r) {
+  $mArt.innerHTML = r.svg || "";
   $mMeta.innerHTML =
-    `<b>uPEG #${id}</b> · ${status === "burned" ? "🔥 burned" : "alive"}<br>` +
-    (status === "burned"
-      ? `last seen with <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${fmtAddr(holder)}</a><br>`
-      : `held by <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${fmtAddr(holder)}</a><br>`) +
-    `seed: <span style="font-size:10px">${seed}</span><br>` +
-    `first cached: ${fmtTime(firstSeenAt)}<br>` +
-    `last seen: ${fmtTime(lastSeenAt)}`;
+    `<b>uPEG #${r.id}</b> · ${r.status === "burned" ? "🔥 burned" : "alive"}<br>` +
+    (r.status === "burned"
+      ? `last seen with <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`
+      : `held by <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`) +
+    `seed: <span style="font-size:10px">${r.seed}</span><br>` +
+    `first cached: ${fmtTime(r.firstSeenAt)}<br>` +
+    `last seen: ${fmtTime(r.lastSeenAt)}`;
   $modal.classList.add("on");
 }
 
 function applyFilter() {
   for (const { div, record } of cellsById.values()) {
-    const show =
+    let show =
       filter === "all" ||
       (filter === "alive" && record.status === "alive") ||
       (filter === "burned" && record.status === "burned");
+    if (walletMode && record.holder.toLowerCase() !== walletMode) show = false;
     div.classList.toggle("filter-hidden", !show);
   }
 }
 
 function refreshCounts() {
-  let alive = 0, burned = 0;
+  let alive = 0, burned = 0, walletAlive = 0, walletBurned = 0;
   for (const { record } of cellsById.values()) {
-    if (record.status === "alive") alive++; else burned++;
+    const w = walletMode && record.holder.toLowerCase() === walletMode;
+    if (record.status === "alive") { alive++; if (w) walletAlive++; }
+    else { burned++; if (w) walletBurned++; }
   }
-  $counts.textContent = `${alive.toLocaleString()} alive · ${burned.toLocaleString()} burned`;
+  if (walletMode) {
+    $counts.textContent =
+      `wallet: ${walletAlive.toLocaleString()} alive · ${walletBurned.toLocaleString()} archived`;
+  } else {
+    $counts.textContent =
+      `${alive.toLocaleString()} alive · ${burned.toLocaleString()} burned`;
+  }
 }
 
 function renderCell(record) {
@@ -276,138 +308,201 @@ function renderCell(record) {
   return div;
 }
 
-// ---------- bootstrap ----------
+// --- core scanning ---
 async function init() {
-  try {
-    db = await openDB();
-  } catch (e) {
-    $status.textContent = "IndexedDB unavailable: " + e.message;
-    return;
-  }
+  try { db = await openDB(); }
+  catch (e) { $status.textContent = "IndexedDB unavailable: " + e.message; return; }
 
-  // 1. paint cached cells immediately so users see something even offline
   const cached = await dbGetAll(db);
   cached.sort((a, b) => a.id - b.id);
   $status.textContent = `loading ${cached.length.toLocaleString()} from local archive…`;
-  for (const c of cached) renderCell({ ...c, status: "burned" }); // tentatively, until live scan reverifies
+  for (const c of cached) renderCell({ ...c, status: "burned" });
   refreshCounts();
 
-  // 2. on-chain header info
-  const [hc, total] = await Promise.all([
-    call(TOKEN, tokenI.encodeFunctionData("HoldersCount")),
-    call(TOKEN, tokenI.encodeFunctionData("UpegsTotalCount"))
-  ]);
-  holdersCount    = Number(tokenI.decodeFunctionResult("HoldersCount", hc)[0]);
-  totalEverMinted = Number(tokenI.decodeFunctionResult("UpegsTotalCount", total)[0]);
+  try {
+    const [hcRaw, totalRaw] = await Promise.all([
+      call(TOKEN, SEL.HoldersCount),
+      call(TOKEN, SEL.UpegsTotalCount)
+    ]);
+    holdersCount    = Number(decodeUint(hcRaw));
+    totalEverMinted = Number(decodeUint(totalRaw));
+  } catch (e) {
+    $status.textContent = "header RPC failed: " + e.message;
+    return;
+  }
   $status.textContent =
     `${holdersCount.toLocaleString()} holders · ${totalEverMinted.toLocaleString()} unicorns ever minted · ${cached.length.toLocaleString()} in local archive`;
 
-  await loadMore();
+  // initial hash route
+  const hash = location.hash.match(/wallet=(0x[0-9a-fA-F]{40})/);
+  if (hash) { $wIn.value = hash[1]; await openWallet(hash[1]); }
+  else await loadMore();
 }
 
 async function loadMore() {
-  if (loading || scanComplete) return;
+  if (loading || scanComplete || walletMode) return;
   loading = true;
-
   const startCount = totalRendered;
-  while (totalRendered - startCount < PAGE_TARGET && nextHolderIdx < holdersCount) {
-    const sliceEnd = Math.min(nextHolderIdx + HOLDER_BATCH, holdersCount);
-    const idxs = Array.from({ length: sliceEnd - nextHolderIdx }, (_, k) => nextHolderIdx + k);
-    nextHolderIdx = sliceEnd;
-    $status.textContent =
-      `${totalRendered} new this scan · holders ${idxs[0]}…${idxs.at(-1)} of ${holdersCount}`;
 
-    const holders = (await pmap(idxs, HOLDER_BATCH, async i => {
-      const r = await call(TOKEN, tokenI.encodeFunctionData("Holder", [i]));
-      return tokenI.decodeFunctionResult("Holder", r)[0];
-    })).filter(a => a && /^0x[0-9a-f]{40}$/i.test(a) &&
-                    a !== "0x0000000000000000000000000000000000000000");
-    if (holders.length === 0) continue;
+  try {
+    while (totalRendered - startCount < PAGE_TARGET && nextHolderIdx < holdersCount) {
+      const sliceEnd = Math.min(nextHolderIdx + HOLDER_BATCH, holdersCount);
+      const idxs = Array.from({ length: sliceEnd - nextHolderIdx }, (_, k) => nextHolderIdx + k);
+      nextHolderIdx = sliceEnd;
+      $status.textContent =
+        `${totalRendered} new · holders ${idxs[0]}…${idxs[idxs.length-1]} of ${holdersCount}`;
 
-    const pages = await pmap(holders, HOLDER_BATCH, async h => {
-      const r = await call(TOKEN, tokenI.encodeFunctionData("OwnerUpegsPage", [h, 0, 100]));
-      return tokenI.decodeFunctionResult("OwnerUpegsPage", r)[0];
-    });
+      const holders = (await pmap(idxs, HOLDER_BATCH, async i =>
+        decodeAddress(await call(TOKEN, callHolder(i)))
+      )).filter(a => typeof a === "string" && /^0x[0-9a-f]{40}$/i.test(a)
+                     && a !== "0x0000000000000000000000000000000000000000");
+      if (holders.length === 0) continue;
 
-    const pairs = [];
-    for (let i = 0; i < holders.length; i++) {
-      const arr = pages[i];
-      if (!arr || arr._err) continue;
-      for (const u of arr) pairs.push({ id: Number(u[0]), seed: u[1].toString(), holder: holders[i] });
-    }
-    if (pairs.length === 0) continue;
+      const pages = await pmap(holders, HOLDER_BATCH, async h =>
+        decodeOwnerUpegsPage(await call(TOKEN, callOwnerUpegsPage(h, 0, 100)))
+      );
 
-    // For each live unicorn: mark alive, render/cache SVG if new
-    const now = Date.now();
-    for (const p of pairs) liveAlive.add(p.id);
-
-    // figure out which need SVG fetched (not already in cellsById with svg)
-    const needSvg = pairs.filter(p => {
-      const existing = cellsById.get(p.id);
-      return !existing || !existing.record.svg;
-    });
-
-    const svgs = await pmap(needSvg, HOLDER_BATCH, async p => {
-      try {
-        const r = await call(HOOK, hookI.encodeFunctionData("generate", [p.seed]));
-        return hookI.decodeFunctionResult("generate", r)[0];
-      } catch (e) { return null; }
-    });
-
-    const svgById = new Map();
-    needSvg.forEach((p, i) => svgById.set(p.id, svgs[i]));
-
-    // build records, render, cache
-    const toCache = [];
-    for (const p of pairs) {
-      const existing = cellsById.get(p.id);
-      const svg = existing?.record?.svg || svgById.get(p.id);
-      const record = {
-        id: p.id,
-        seed: p.seed,
-        svg,
-        holder: p.holder,
-        status: "alive",
-        firstSeenAt: existing?.record?.firstSeenAt || now,
-        lastSeenAt: now
-      };
-      renderCell(record);
-      if (!existing || existing.record.status !== "alive" || existing.record.holder !== p.holder) {
-        toCache.push(record);
+      const pairs = [];
+      for (let i = 0; i < holders.length; i++) {
+        const arr = pages[i];
+        if (!arr || arr._err) continue;
+        for (const u of arr) pairs.push({ id: u.id, seed: u.seed, holder: holders[i] });
       }
-    }
-    if (toCache.length) await dbBulkPut(db, toCache);
+      if (pairs.length === 0) continue;
 
-    totalRendered += pairs.length;
-    refreshCounts();
-    applyFilter();
+      const now = Date.now();
+      for (const p of pairs) liveAlive.add(p.id);
+
+      const needSvg = pairs.filter(p => {
+        const ex = cellsById.get(p.id);
+        return !ex || !ex.record.svg;
+      });
+      const svgs = await pmap(needSvg, HOLDER_BATCH, async p => {
+        try { return decodeString(await call(HOOK, callGenerate(p.seed))); }
+        catch { return null; }
+      });
+      const svgById = new Map();
+      needSvg.forEach((p, i) => svgById.set(p.id, svgs[i]));
+
+      const toCache = [];
+      for (const p of pairs) {
+        const ex = cellsById.get(p.id);
+        const svg = ex?.record?.svg || svgById.get(p.id);
+        const record = {
+          id: p.id, seed: p.seed, svg, holder: p.holder,
+          status: "alive",
+          firstSeenAt: ex?.record?.firstSeenAt || now,
+          lastSeenAt: now
+        };
+        renderCell(record);
+        if (!ex || ex.record.status !== "alive" || ex.record.holder !== p.holder) toCache.push(record);
+      }
+      if (toCache.length) await dbBulkPut(db, toCache);
+
+      totalRendered += pairs.length;
+      refreshCounts();
+      applyFilter();
+    }
+  } catch (e) {
+    $status.textContent = "scan error: " + e.message;
+    loading = false;
+    return;
   }
 
   if (nextHolderIdx >= holdersCount && !scanComplete) {
     scanComplete = true;
-    // Anything cached but not seen this scan = burned since last visit
     const burnedNow = [];
     for (const [id, { record }] of cellsById) {
       if (!liveAlive.has(id) && record.status !== "burned") {
         record.status = "burned";
-        burnedNow.push({ ...record, status: "burned", lastSeenAt: record.lastSeenAt });
+        burnedNow.push({ ...record, status: "burned" });
       }
     }
     if (burnedNow.length) await dbBulkPut(db, burnedNow);
-    for (const { div, record } of cellsById.values()) {
+    for (const { div, record } of cellsById.values())
       div.classList.toggle("burned", record.status === "burned");
-    }
     refreshCounts();
     applyFilter();
     $sent.textContent = `✓ scan complete — ${liveAlive.size.toLocaleString()} alive · ${cellsById.size - liveAlive.size} burned in archive`;
   } else {
     $status.textContent =
-      `${liveAlive.size.toLocaleString()} alive seen · ${holdersCount - nextHolderIdx} holders left to scan`;
+      `${liveAlive.size.toLocaleString()} alive seen · ${holdersCount - nextHolderIdx} holders left`;
   }
   loading = false;
 }
 
-// ---------- toolbar ----------
+// --- wallet lookup ---
+async function openWallet(addr) {
+  addr = addr.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(addr)) {
+    $status.textContent = "invalid address";
+    return;
+  }
+  walletMode = addr;
+  $wClear.style.display = "";
+  location.hash = "wallet=" + addr;
+  $sent.textContent = `wallet view — fetching live state for ${fmtAddr(addr)}…`;
+
+  // 1. live: paginate everything they currently own
+  const now = Date.now();
+  let page = 0, fetched = 0;
+  const live = [];
+  while (true) {
+    let arr;
+    try { arr = decodeOwnerUpegsPage(await call(TOKEN, callOwnerUpegsPage(addr, page, 100))); }
+    catch (e) { $status.textContent = "wallet RPC error: " + e.message; break; }
+    if (arr.length === 0) break;
+    live.push(...arr);
+    if (arr.length < 100) break;
+    page++;
+    if (page > 100) break;
+  }
+
+  // 2. fetch SVGs we don't already have
+  const need = live.filter(u => {
+    const ex = cellsById.get(u.id);
+    return !ex || !ex.record.svg;
+  });
+  const svgs = await pmap(need, HOLDER_BATCH, async u => {
+    try { return decodeString(await call(HOOK, callGenerate(u.seed))); }
+    catch { return null; }
+  });
+  const svgById = new Map();
+  need.forEach((u, i) => svgById.set(u.id, svgs[i]));
+
+  // 3. render alive ones
+  const toCache = [];
+  for (const u of live) {
+    const ex = cellsById.get(u.id);
+    const svg = ex?.record?.svg || svgById.get(u.id);
+    const record = {
+      id: u.id, seed: u.seed, svg, holder: addr,
+      status: "alive",
+      firstSeenAt: ex?.record?.firstSeenAt || now,
+      lastSeenAt: now
+    };
+    renderCell(record);
+    toCache.push(record);
+  }
+  if (toCache.length) await dbBulkPut(db, toCache);
+
+  refreshCounts();
+  applyFilter();
+  $sent.textContent =
+    `wallet ${fmtAddr(addr)} — ${live.length} currently held · scroll for archive`;
+}
+
+function exitWallet() {
+  walletMode = null;
+  $wClear.style.display = "none";
+  $wIn.value = "";
+  history.replaceState(null, "", location.pathname);
+  refreshCounts();
+  applyFilter();
+  if (!scanComplete) loadMore();
+}
+
+// --- toolbar ---
 function setFilter(name) {
   filter = name;
   for (const b of [$fAll, $fAlive, $fBurned]) b.classList.remove("on");
@@ -440,15 +535,19 @@ $clear.onclick = async () => {
   totalRendered = 0;
   refreshCounts();
   $sent.textContent = "scroll for more";
-  await loadMore();
+  if (!walletMode) await loadMore();
 };
 
-// ---------- scroll ----------
+$wGo.onclick = () => openWallet($wIn.value);
+$wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.value); });
+$wClear.onclick = exitWallet;
+
+// --- scroll ---
 const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
                                     { rootMargin: "400px 0px" });
 io.observe($sent);
 
-init().catch(e => { $status.textContent = "error: " + e.message; });
+init().catch(e => { $status.textContent = "init error: " + e.message; });
 </script>
 </body>
 </html>
