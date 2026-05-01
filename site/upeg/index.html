@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>uPEG — every unicorn</title>
-<meta name="description" content="Live gallery of every uPEG unicorn currently held on Ethereum. Rendered straight from the contract.">
+<title>uPEG — every unicorn (live + archive)</title>
+<meta name="description" content="Live + cached gallery of every uPEG unicorn ever seen. Burned unicorns survive in your local archive.">
 <link rel="icon" href="/favicon.svg">
 <style>
   :root { color-scheme: dark; }
@@ -16,7 +16,15 @@
   .sub { color: #8a8f99; font-size: 12px; }
   .sub a { color: #6cf; text-decoration: none; }
   .sub a:hover { text-decoration: underline; }
-  #status { color: #8a8f99; font-size: 12px; margin: 0 0 16px; min-height: 16px; }
+  #status { color: #8a8f99; font-size: 12px; margin: 0 0 12px; min-height: 16px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px;
+             font-size: 12px; align-items: center; }
+  .toolbar button { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
+                    padding: 5px 10px; border-radius: 3px; cursor: pointer;
+                    font: inherit; }
+  .toolbar button:hover { background: #262a32; }
+  .toolbar button.on { background: #2a3548; border-color: #3d5277; }
+  .toolbar .pill { color: #8a8f99; padding: 5px 8px; }
   #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
           gap: 6px; }
   .cell { aspect-ratio: 1; background: #16181d; border-radius: 3px;
@@ -24,37 +32,52 @@
   .cell svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
   .cell .tag { position: absolute; bottom: 2px; right: 4px; font-size: 9px;
                color: #fff; opacity: .55; mix-blend-mode: difference; pointer-events: none; }
+  .cell.burned svg { opacity: .35; filter: grayscale(.7); }
+  .cell.burned::after {
+    content: "🔥"; position: absolute; top: 4px; left: 4px; font-size: 12px;
+    text-shadow: 0 0 6px #000; pointer-events: none;
+  }
   .skeleton { background: linear-gradient(90deg,#16181d,#1d2026,#16181d);
               background-size: 200% 100%; animation: sk 1.4s infinite; }
   @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
   #sentinel { height: 60px; margin: 24px 0 0; color: #666; text-align: center;
               font-size: 12px; line-height: 60px; }
+  .filter-hidden { display: none !important; }
   /* modal */
   #modal { position: fixed; inset: 0; background: #000c; display: none;
            align-items: center; justify-content: center; padding: 20px; z-index: 10; }
   #modal.on { display: flex; }
   #modal .box { background: #16181d; border-radius: 6px; padding: 18px;
-                max-width: 420px; width: 100%; }
+                max-width: 440px; width: 100%; }
   #modal .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
                 background: #0b0c10; border-radius: 4px; margin-bottom: 12px; }
-  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.6; }
+  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.7; }
   #modal .meta b { color: #fff; }
+  #modal .meta a { color: #6cf; text-decoration: none; }
   #modal .x { float: right; color: #888; cursor: pointer; padding: 0 4px; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>uPEG unicorns — every one currently held on chain</h1>
+  <h1>uPEG unicorns — live state + your local archive of burned ones</h1>
   <div class="sub">
-    rendered live from
+    rendered from
     <a href="https://etherscan.io/address/0x44b28991b167582f18ba0259e0173176ca125505" target="_blank" rel="noopener">token</a>
     +
     <a href="https://etherscan.io/address/0xe54082DfBf044B6a8F584bdDdb90a22d5613C440" target="_blank" rel="noopener">hook</a>
-    · no IPFS, no API, just chain bytes
+    · burned unicorns are preserved in IndexedDB on your device
   </div>
 </header>
 <div id="status">connecting…</div>
+<div class="toolbar">
+  <button id="filterAll" class="on">all</button>
+  <button id="filterAlive">alive</button>
+  <button id="filterBurned">burned 🔥</button>
+  <span class="pill" id="counts"></span>
+  <button id="export" style="margin-left:auto">export json</button>
+  <button id="clearCache">clear cache</button>
+</div>
 <div id="grid"></div>
 <div id="sentinel">scroll for more</div>
 
@@ -80,12 +103,13 @@ const tokenI = new Interface([
   "function Holder(uint256) view returns (address)",
   "function UpegsTotalCount() view returns (uint256)",
   "function OwnerUpegsCount(address) view returns (uint256)",
-  "function OwnerUpegsPage(address,uint256,uint256) view returns (tuple(uint256 id, uint256 seed)[])"
+  "function OwnerUpegsPage(address,uint256,uint256) view returns (tuple(uint256,uint256)[])"
 ]);
 const hookI = new Interface([
   "function generate(uint256) view returns (string)"
 ]);
 
+// ---------- RPC ----------
 let rpcId = 0;
 async function call(to, data) {
   const res = await fetch(RPC, {
@@ -98,7 +122,6 @@ async function call(to, data) {
   if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
   return j.result;
 }
-
 async function pmap(items, n, fn) {
   const out = new Array(items.length);
   let i = 0;
@@ -112,31 +135,164 @@ async function pmap(items, n, fn) {
   return out;
 }
 
+// ---------- IndexedDB archive ----------
+const DB_NAME = "upeg-archive";
+const STORE = "unicorns";
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: "id" });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function dbGetAll(db) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readonly");
+    const r = tx.objectStore(STORE).getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function dbPut(db, item) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(item);
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
+  });
+}
+function dbBulkPut(db, items) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readwrite");
+    const s = tx.objectStore(STORE);
+    for (const it of items) s.put(it);
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
+  });
+}
+function dbUpdate(db, id, patch) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readwrite");
+    const s = tx.objectStore(STORE);
+    const g = s.get(id);
+    g.onsuccess = () => {
+      const cur = g.result;
+      if (!cur) return res();
+      Object.assign(cur, patch);
+      s.put(cur);
+    };
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
+  });
+}
+function dbClear(db) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+// ---------- DOM ----------
 const $status = document.getElementById("status");
 const $grid   = document.getElementById("grid");
 const $sent   = document.getElementById("sentinel");
 const $modal  = document.getElementById("modal");
 const $mArt   = document.getElementById("modalArt");
 const $mMeta  = document.getElementById("modalMeta");
+const $counts = document.getElementById("counts");
 
-let holdersCount = 0;
-let totalEverMinted = 0;
-let nextHolderIdx = 0;
-let totalRendered = 0;
-let loading = false;
-let done = false;
+const $fAll = document.getElementById("filterAll");
+const $fAlive = document.getElementById("filterAlive");
+const $fBurned = document.getElementById("filterBurned");
+const $export = document.getElementById("export");
+const $clear = document.getElementById("clearCache");
 
-function openModal({ id, seed, holder, svg }) {
+// ---------- state ----------
+let db;
+let holdersCount = 0, totalEverMinted = 0;
+let nextHolderIdx = 0, totalRendered = 0;
+let loading = false, scanComplete = false;
+let liveAlive = new Set();   // ids confirmed alive in this scan
+let cellsById = new Map();   // id -> {div, record}
+let filter = "all";
+
+function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
+function fmtTime(t) { return new Date(t).toLocaleString(); }
+
+function openModal({ id, seed, svg, holder, status, firstSeenAt, lastSeenAt }) {
   $mArt.innerHTML = svg || "";
   $mMeta.innerHTML =
-    `<b>Upeg #${id}</b><br>` +
-    `holder: <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${holder}</a><br>` +
-    `seed: ${seed.toString()}<br>` +
-    `<a href="https://etherscan.io/address/${TOKEN}#readContract" target="_blank" rel="noopener">read on etherscan →</a>`;
+    `<b>uPEG #${id}</b> · ${status === "burned" ? "🔥 burned" : "alive"}<br>` +
+    (status === "burned"
+      ? `last seen with <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${fmtAddr(holder)}</a><br>`
+      : `held by <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${fmtAddr(holder)}</a><br>`) +
+    `seed: <span style="font-size:10px">${seed}</span><br>` +
+    `first cached: ${fmtTime(firstSeenAt)}<br>` +
+    `last seen: ${fmtTime(lastSeenAt)}`;
   $modal.classList.add("on");
 }
 
+function applyFilter() {
+  for (const { div, record } of cellsById.values()) {
+    const show =
+      filter === "all" ||
+      (filter === "alive" && record.status === "alive") ||
+      (filter === "burned" && record.status === "burned");
+    div.classList.toggle("filter-hidden", !show);
+  }
+}
+
+function refreshCounts() {
+  let alive = 0, burned = 0;
+  for (const { record } of cellsById.values()) {
+    if (record.status === "alive") alive++; else burned++;
+  }
+  $counts.textContent = `${alive.toLocaleString()} alive · ${burned.toLocaleString()} burned`;
+}
+
+function renderCell(record) {
+  const existing = cellsById.get(record.id);
+  if (existing) {
+    existing.record = record;
+    existing.div.classList.toggle("burned", record.status === "burned");
+    if (record.svg && !existing.div._hasSvg) {
+      existing.div.innerHTML = record.svg + `<span class="tag">#${record.id}</span>`;
+      existing.div._hasSvg = true;
+    }
+    return existing.div;
+  }
+  const div = document.createElement("div");
+  div.className = "cell" + (record.svg ? "" : " skeleton") + (record.status === "burned" ? " burned" : "");
+  div.dataset.id = record.id;
+  div.title = `#${record.id} · ${fmtAddr(record.holder)}`;
+  div.innerHTML = (record.svg || "") + `<span class="tag">#${record.id}</span>`;
+  div._hasSvg = !!record.svg;
+  div.addEventListener("click", () => openModal(record));
+  $grid.appendChild(div);
+  cellsById.set(record.id, { div, record });
+  return div;
+}
+
+// ---------- bootstrap ----------
 async function init() {
+  try {
+    db = await openDB();
+  } catch (e) {
+    $status.textContent = "IndexedDB unavailable: " + e.message;
+    return;
+  }
+
+  // 1. paint cached cells immediately so users see something even offline
+  const cached = await dbGetAll(db);
+  cached.sort((a, b) => a.id - b.id);
+  $status.textContent = `loading ${cached.length.toLocaleString()} from local archive…`;
+  for (const c of cached) renderCell({ ...c, status: "burned" }); // tentatively, until live scan reverifies
+  refreshCounts();
+
+  // 2. on-chain header info
   const [hc, total] = await Promise.all([
     call(TOKEN, tokenI.encodeFunctionData("HoldersCount")),
     call(TOKEN, tokenI.encodeFunctionData("UpegsTotalCount"))
@@ -144,12 +300,13 @@ async function init() {
   holdersCount    = Number(tokenI.decodeFunctionResult("HoldersCount", hc)[0]);
   totalEverMinted = Number(tokenI.decodeFunctionResult("UpegsTotalCount", total)[0]);
   $status.textContent =
-    `${holdersCount.toLocaleString()} holders · ${totalEverMinted.toLocaleString()} unicorns ever minted`;
+    `${holdersCount.toLocaleString()} holders · ${totalEverMinted.toLocaleString()} unicorns ever minted · ${cached.length.toLocaleString()} in local archive`;
+
   await loadMore();
 }
 
 async function loadMore() {
-  if (loading || done) return;
+  if (loading || scanComplete) return;
   loading = true;
 
   const startCount = totalRendered;
@@ -158,7 +315,7 @@ async function loadMore() {
     const idxs = Array.from({ length: sliceEnd - nextHolderIdx }, (_, k) => nextHolderIdx + k);
     nextHolderIdx = sliceEnd;
     $status.textContent =
-      `${totalRendered} shown · scanning holders ${idxs[0]}…${idxs.at(-1)} of ${holdersCount}`;
+      `${totalRendered} new this scan · holders ${idxs[0]}…${idxs.at(-1)} of ${holdersCount}`;
 
     const holders = (await pmap(idxs, HOLDER_BATCH, async i => {
       const r = await call(TOKEN, tokenI.encodeFunctionData("Holder", [i]));
@@ -176,43 +333,117 @@ async function loadMore() {
     for (let i = 0; i < holders.length; i++) {
       const arr = pages[i];
       if (!arr || arr._err) continue;
-      for (const u of arr) pairs.push({ id: Number(u.id), seed: u.seed, holder: holders[i] });
+      for (const u of arr) pairs.push({ id: Number(u[0]), seed: u[1].toString(), holder: holders[i] });
     }
     if (pairs.length === 0) continue;
 
-    const cells = pairs.map(p => {
-      const div = document.createElement("div");
-      div.className = "cell skeleton";
-      div.dataset.id = p.id;
-      div.title = `#${p.id} · ${p.holder}`;
-      div.innerHTML = `<span class="tag">#${p.id}</span>`;
-      div.addEventListener("click", () => openModal({ ...p, svg: div._svg }));
-      $grid.appendChild(div);
-      return { p, div };
+    // For each live unicorn: mark alive, render/cache SVG if new
+    const now = Date.now();
+    for (const p of pairs) liveAlive.add(p.id);
+
+    // figure out which need SVG fetched (not already in cellsById with svg)
+    const needSvg = pairs.filter(p => {
+      const existing = cellsById.get(p.id);
+      return !existing || !existing.record.svg;
     });
 
-    await pmap(cells, HOLDER_BATCH, async ({ p, div }) => {
+    const svgs = await pmap(needSvg, HOLDER_BATCH, async p => {
       try {
         const r = await call(HOOK, hookI.encodeFunctionData("generate", [p.seed]));
-        const svg = hookI.decodeFunctionResult("generate", r)[0];
-        div._svg = svg;
-        div.innerHTML = svg + `<span class="tag">#${p.id}</span>`;
-      } catch (e) { /* skip */ }
-      div.classList.remove("skeleton");
+        return hookI.decodeFunctionResult("generate", r)[0];
+      } catch (e) { return null; }
     });
 
+    const svgById = new Map();
+    needSvg.forEach((p, i) => svgById.set(p.id, svgs[i]));
+
+    // build records, render, cache
+    const toCache = [];
+    for (const p of pairs) {
+      const existing = cellsById.get(p.id);
+      const svg = existing?.record?.svg || svgById.get(p.id);
+      const record = {
+        id: p.id,
+        seed: p.seed,
+        svg,
+        holder: p.holder,
+        status: "alive",
+        firstSeenAt: existing?.record?.firstSeenAt || now,
+        lastSeenAt: now
+      };
+      renderCell(record);
+      if (!existing || existing.record.status !== "alive" || existing.record.holder !== p.holder) {
+        toCache.push(record);
+      }
+    }
+    if (toCache.length) await dbBulkPut(db, toCache);
+
     totalRendered += pairs.length;
+    refreshCounts();
+    applyFilter();
   }
 
-  if (nextHolderIdx >= holdersCount) {
-    done = true;
-    $sent.textContent = `✓ all ${totalRendered.toLocaleString()} loaded`;
+  if (nextHolderIdx >= holdersCount && !scanComplete) {
+    scanComplete = true;
+    // Anything cached but not seen this scan = burned since last visit
+    const burnedNow = [];
+    for (const [id, { record }] of cellsById) {
+      if (!liveAlive.has(id) && record.status !== "burned") {
+        record.status = "burned";
+        burnedNow.push({ ...record, status: "burned", lastSeenAt: record.lastSeenAt });
+      }
+    }
+    if (burnedNow.length) await dbBulkPut(db, burnedNow);
+    for (const { div, record } of cellsById.values()) {
+      div.classList.toggle("burned", record.status === "burned");
+    }
+    refreshCounts();
+    applyFilter();
+    $sent.textContent = `✓ scan complete — ${liveAlive.size.toLocaleString()} alive · ${cellsById.size - liveAlive.size} burned in archive`;
+  } else {
+    $status.textContent =
+      `${liveAlive.size.toLocaleString()} alive seen · ${holdersCount - nextHolderIdx} holders left to scan`;
   }
-  $status.textContent =
-    `${totalRendered.toLocaleString()} shown · ${holdersCount - nextHolderIdx} holders remaining`;
   loading = false;
 }
 
+// ---------- toolbar ----------
+function setFilter(name) {
+  filter = name;
+  for (const b of [$fAll, $fAlive, $fBurned]) b.classList.remove("on");
+  ({ all: $fAll, alive: $fAlive, burned: $fBurned })[name].classList.add("on");
+  applyFilter();
+}
+$fAll.onclick = () => setFilter("all");
+$fAlive.onclick = () => setFilter("alive");
+$fBurned.onclick = () => setFilter("burned");
+
+$export.onclick = async () => {
+  const all = await dbGetAll(db);
+  const blob = new Blob([JSON.stringify(all, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `upeg-archive-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+$clear.onclick = async () => {
+  if (!confirm("delete all cached unicorns from this browser?")) return;
+  await dbClear(db);
+  for (const { div } of cellsById.values()) div.remove();
+  cellsById.clear();
+  liveAlive.clear();
+  scanComplete = false;
+  nextHolderIdx = 0;
+  totalRendered = 0;
+  refreshCounts();
+  $sent.textContent = "scroll for more";
+  await loadMore();
+};
+
+// ---------- scroll ----------
 const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
                                     { rootMargin: "400px 0px" });
 io.observe($sent);
