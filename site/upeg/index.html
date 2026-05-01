@@ -341,6 +341,7 @@ async function init() {
 
 async function loadMore() {
   if (loading || scanComplete || walletMode) return;
+  if (holdersCount === 0) return;  // init hasn't loaded header yet — IO race guard
   loading = true;
   const startCount = totalRendered;
 
