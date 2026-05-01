@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG — every unicorn</title>
+<meta name="description" content="Live gallery of every uPEG unicorn currently held on Ethereum. Rendered straight from the contract.">
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  #status { color: #8a8f99; font-size: 12px; margin: 0 0 16px; min-height: 16px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+          gap: 6px; }
+  .cell { aspect-ratio: 1; background: #16181d; border-radius: 3px;
+          position: relative; overflow: hidden; cursor: pointer; }
+  .cell svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .cell .tag { position: absolute; bottom: 2px; right: 4px; font-size: 9px;
+               color: #fff; opacity: .55; mix-blend-mode: difference; pointer-events: none; }
+  .skeleton { background: linear-gradient(90deg,#16181d,#1d2026,#16181d);
+              background-size: 200% 100%; animation: sk 1.4s infinite; }
+  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  #sentinel { height: 60px; margin: 24px 0 0; color: #666; text-align: center;
+              font-size: 12px; line-height: 60px; }
+  /* modal */
+  #modal { position: fixed; inset: 0; background: #000c; display: none;
+           align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  #modal.on { display: flex; }
+  #modal .box { background: #16181d; border-radius: 6px; padding: 18px;
+                max-width: 420px; width: 100%; }
+  #modal .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+                background: #0b0c10; border-radius: 4px; margin-bottom: 12px; }
+  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.6; }
+  #modal .meta b { color: #fff; }
+  #modal .x { float: right; color: #888; cursor: pointer; padding: 0 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG unicorns — every one currently held on chain</h1>
+  <div class="sub">
+    rendered live from
+    <a href="https://etherscan.io/address/0x44b28991b167582f18ba0259e0173176ca125505" target="_blank" rel="noopener">token</a>
+    +
+    <a href="https://etherscan.io/address/0xe54082DfBf044B6a8F584bdDdb90a22d5613C440" target="_blank" rel="noopener">hook</a>
+    · no IPFS, no API, just chain bytes
+  </div>
+</header>
+<div id="status">connecting…</div>
+<div id="grid"></div>
+<div id="sentinel">scroll for more</div>
+
+<div id="modal" onclick="if(event.target.id==='modal')this.classList.remove('on')">
+  <div class="box">
+    <span class="x" onclick="document.getElementById('modal').classList.remove('on')">✕</span>
+    <div class="art" id="modalArt"></div>
+    <div class="meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<script type="module">
+import { Interface } from "https://esm.sh/ethers@6.13.4";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0x44b28991b167582f18ba0259e0173176ca125505";
+const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
+const PAGE_TARGET  = 100;
+const HOLDER_BATCH = 10;
+
+const tokenI = new Interface([
+  "function HoldersCount() view returns (uint256)",
+  "function Holder(uint256) view returns (address)",
+  "function UpegsTotalCount() view returns (uint256)",
+  "function OwnerUpegsCount(address) view returns (uint256)",
+  "function OwnerUpegsPage(address,uint256,uint256) view returns (tuple(uint256 id, uint256 seed)[])"
+]);
+const hookI = new Interface([
+  "function generate(uint256) view returns (string)"
+]);
+
+let rpcId = 0;
+async function call(to, data) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc:"2.0", id: ++rpcId, method:"eth_call",
+                           params:[{ to, data }, "latest"] })
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  return j.result;
+}
+
+async function pmap(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) {
+      const k = i++;
+      try { out[k] = await fn(items[k], k); }
+      catch (e) { out[k] = { _err: e }; }
+    }
+  }));
+  return out;
+}
+
+const $status = document.getElementById("status");
+const $grid   = document.getElementById("grid");
+const $sent   = document.getElementById("sentinel");
+const $modal  = document.getElementById("modal");
+const $mArt   = document.getElementById("modalArt");
+const $mMeta  = document.getElementById("modalMeta");
+
+let holdersCount = 0;
+let totalEverMinted = 0;
+let nextHolderIdx = 0;
+let totalRendered = 0;
+let loading = false;
+let done = false;
+
+function openModal({ id, seed, holder, svg }) {
+  $mArt.innerHTML = svg || "";
+  $mMeta.innerHTML =
+    `<b>Upeg #${id}</b><br>` +
+    `holder: <a href="https://etherscan.io/address/${holder}" target="_blank" rel="noopener">${holder}</a><br>` +
+    `seed: ${seed.toString()}<br>` +
+    `<a href="https://etherscan.io/address/${TOKEN}#readContract" target="_blank" rel="noopener">read on etherscan →</a>`;
+  $modal.classList.add("on");
+}
+
+async function init() {
+  const [hc, total] = await Promise.all([
+    call(TOKEN, tokenI.encodeFunctionData("HoldersCount")),
+    call(TOKEN, tokenI.encodeFunctionData("UpegsTotalCount"))
+  ]);
+  holdersCount    = Number(tokenI.decodeFunctionResult("HoldersCount", hc)[0]);
+  totalEverMinted = Number(tokenI.decodeFunctionResult("UpegsTotalCount", total)[0]);
+  $status.textContent =
+    `${holdersCount.toLocaleString()} holders · ${totalEverMinted.toLocaleString()} unicorns ever minted`;
+  await loadMore();
+}
+
+async function loadMore() {
+  if (loading || done) return;
+  loading = true;
+
+  const startCount = totalRendered;
+  while (totalRendered - startCount < PAGE_TARGET && nextHolderIdx < holdersCount) {
+    const sliceEnd = Math.min(nextHolderIdx + HOLDER_BATCH, holdersCount);
+    const idxs = Array.from({ length: sliceEnd - nextHolderIdx }, (_, k) => nextHolderIdx + k);
+    nextHolderIdx = sliceEnd;
+    $status.textContent =
+      `${totalRendered} shown · scanning holders ${idxs[0]}…${idxs.at(-1)} of ${holdersCount}`;
+
+    const holders = (await pmap(idxs, HOLDER_BATCH, async i => {
+      const r = await call(TOKEN, tokenI.encodeFunctionData("Holder", [i]));
+      return tokenI.decodeFunctionResult("Holder", r)[0];
+    })).filter(a => a && /^0x[0-9a-f]{40}$/i.test(a) &&
+                    a !== "0x0000000000000000000000000000000000000000");
+    if (holders.length === 0) continue;
+
+    const pages = await pmap(holders, HOLDER_BATCH, async h => {
+      const r = await call(TOKEN, tokenI.encodeFunctionData("OwnerUpegsPage", [h, 0, 100]));
+      return tokenI.decodeFunctionResult("OwnerUpegsPage", r)[0];
+    });
+
+    const pairs = [];
+    for (let i = 0; i < holders.length; i++) {
+      const arr = pages[i];
+      if (!arr || arr._err) continue;
+      for (const u of arr) pairs.push({ id: Number(u.id), seed: u.seed, holder: holders[i] });
+    }
+    if (pairs.length === 0) continue;
+
+    const cells = pairs.map(p => {
+      const div = document.createElement("div");
+      div.className = "cell skeleton";
+      div.dataset.id = p.id;
+      div.title = `#${p.id} · ${p.holder}`;
+      div.innerHTML = `<span class="tag">#${p.id}</span>`;
+      div.addEventListener("click", () => openModal({ ...p, svg: div._svg }));
+      $grid.appendChild(div);
+      return { p, div };
+    });
+
+    await pmap(cells, HOLDER_BATCH, async ({ p, div }) => {
+      try {
+        const r = await call(HOOK, hookI.encodeFunctionData("generate", [p.seed]));
+        const svg = hookI.decodeFunctionResult("generate", r)[0];
+        div._svg = svg;
+        div.innerHTML = svg + `<span class="tag">#${p.id}</span>`;
+      } catch (e) { /* skip */ }
+      div.classList.remove("skeleton");
+    });
+
+    totalRendered += pairs.length;
+  }
+
+  if (nextHolderIdx >= holdersCount) {
+    done = true;
+    $sent.textContent = `✓ all ${totalRendered.toLocaleString()} loaded`;
+  }
+  $status.textContent =
+    `${totalRendered.toLocaleString()} shown · ${holdersCount - nextHolderIdx} holders remaining`;
+  loading = false;
+}
+
+const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
+                                    { rootMargin: "400px 0px" });
+io.observe($sent);
+
+init().catch(e => { $status.textContent = "error: " + e.message; });
+</script>
+</body>
+</html>
