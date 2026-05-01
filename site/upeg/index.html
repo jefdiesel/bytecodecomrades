@@ -92,6 +92,12 @@
     <span class="x" onclick="document.getElementById('modal').classList.remove('on')">✕</span>
     <div class="art" id="modalArt"></div>
     <div class="meta" id="modalMeta"></div>
+    <div class="mint" id="modalMint" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2e36;">
+      <button id="mintBtn" style="background:#2a3548;color:#e8e8e8;border:1px solid #3d5277;padding:8px 14px;border-radius:3px;cursor:pointer;font:inherit;width:100%">
+        mint as ethscription
+      </button>
+      <div id="mintStatus" style="font-size:11px;color:#8a8f99;margin-top:6px;line-height:1.5;word-break:break-all"></div>
+    </div>
   </div>
 </div>
 
@@ -245,7 +251,9 @@ let walletMode = null; // null or lowercased address
 function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
 function fmtTime(t) { return new Date(t).toLocaleString(); }
 
+let currentModalRecord = null;
 function openModal(r) {
+  currentModalRecord = r;
   $mArt.innerHTML = r.svg || "";
   $mMeta.innerHTML =
     `<b>uPEG #${r.id}</b> · ${r.status === "burned" ? "🔥 burned" : "alive"}<br>` +
@@ -255,6 +263,9 @@ function openModal(r) {
     `seed: <span style="font-size:10px">${r.seed}</span><br>` +
     `first cached: ${fmtTime(r.firstSeenAt)}<br>` +
     `last seen: ${fmtTime(r.lastSeenAt)}`;
+  document.getElementById("mintStatus").textContent = "";
+  document.getElementById("mintBtn").disabled = !r.svg;
+  document.getElementById("mintBtn").textContent = r.svg ? "mint as ethscription" : "no svg cached — can't mint";
   $modal.classList.add("on");
 }
 
@@ -316,7 +327,10 @@ async function init() {
   const cached = await dbGetAll(db);
   cached.sort((a, b) => a.id - b.id);
   $status.textContent = `loading ${cached.length.toLocaleString()} from local archive…`;
-  for (const c of cached) renderCell({ ...c, status: "burned" });
+  // Render cached items as "alive" (unverified). Live scan will confirm or
+  // flip to "burned" once it finishes. This avoids a sea of false-positive 🔥
+  // badges before the scan reaches their holders.
+  for (const c of cached) renderCell({ ...c, status: "alive" });
   refreshCounts();
 
   try {
@@ -542,6 +556,84 @@ $clear.onclick = async () => {
 $wGo.onclick = () => openWallet($wIn.value);
 $wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.value); });
 $wClear.onclick = exitWallet;
+
+// --- mint as ethscription ---
+const ETHSCRIBER = "0x0000000000000000000000000000000000000000"; // TODO: set after deploy
+
+// utf-8 → hex
+function strToHex(s) {
+  const bytes = new TextEncoder().encode(s);
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+// abi-encode `mint(string)` calldata
+function encodeMintCalldata(dataURI) {
+  const sig = "d85d3d27"; // mint(string)
+  const hex = strToHex(dataURI);
+  const lenHex = pad32(BigInt(hex.length / 2).toString(16));
+  // pad data to 32-byte boundary
+  let padded = hex;
+  if (padded.length % 64 !== 0) padded += "0".repeat(64 - (padded.length % 64));
+  // dynamic types: head = offset (0x20), tail = length + bytes
+  const offset = pad32("20");
+  return "0x" + sig + offset + lenHex + padded;
+}
+
+// browser-side base64 of an svg string (handles unicode)
+function svgToDataURI(svg) {
+  const utf8 = unescape(encodeURIComponent(svg));
+  return "data:image/svg+xml;base64," + btoa(utf8);
+}
+
+async function mintEthscription() {
+  const r = currentModalRecord;
+  const $btn = document.getElementById("mintBtn");
+  const $st = document.getElementById("mintStatus");
+  if (!r || !r.svg) { $st.textContent = "no svg cached — open a unicorn the gallery has fetched"; return; }
+  if (ETHSCRIBER === "0x0000000000000000000000000000000000000000") {
+    $st.innerHTML = "ethscriber contract not deployed yet — see <code>src/UpegEthscriber.sol</code>";
+    return;
+  }
+  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask or similar"; return; }
+
+  $btn.disabled = true;
+  $st.textContent = "connecting wallet…";
+  try {
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const from = accounts[0];
+
+    const chainId = await window.ethereum.request({ method: "eth_chainId" });
+    if (chainId !== "0x1") {
+      $st.textContent = "switch to Ethereum mainnet to mint";
+      try {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: "0x1" }]
+        });
+      } catch { $btn.disabled = false; return; }
+    }
+
+    const dataURI = svgToDataURI(r.svg);
+    const data = encodeMintCalldata(dataURI);
+    $st.textContent = `signing tx (${(data.length / 2 / 1024).toFixed(1)} KB calldata)…`;
+
+    const txHash = await window.ethereum.request({
+      method: "eth_sendTransaction",
+      params: [{ from, to: ETHSCRIBER, value: "0x0", data }]
+    });
+
+    $st.innerHTML =
+      `tx sent: <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">${txHash.slice(0,10)}…${txHash.slice(-6)}</a><br>` +
+      `once mined, your ethscription will be at <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com</a>`;
+  } catch (e) {
+    $st.textContent = "mint failed: " + (e.message || String(e));
+  } finally {
+    $btn.disabled = false;
+  }
+}
+document.getElementById("mintBtn").onclick = mintEthscription;
 
 // --- scroll ---
 const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
