@@ -588,7 +588,8 @@ function strToHex(s) {
 function utf8ToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
 
 // JSON → base64 with strict insertion-order key preservation (the parser is picky).
-function jsonToB64(obj) { return btoa(JSON.stringify(obj)); }
+// Use utf-8 bytes path so any non-Latin1 chars (em-dash etc.) don't break btoa.
+function jsonToB64(obj) { return utf8ToB64(JSON.stringify(obj)); }
 
 // SHA-256 of a string (hex output) — for uniqueness pre-check
 async function sha256Hex(s) {
@@ -602,7 +603,7 @@ function buildItemJson(record) {
     item_index:        record.id,
     name:              `uPEG #${record.id}`,
     background_color:  "0b0c10",
-    description:       `uPEG unicorn #${record.id} — on-chain SVG, deterministic from seed.`,
+    description:       `uPEG unicorn #${record.id}. On-chain SVG, deterministic from seed.`,
     attributes: [
       { trait_type: "upeg_id", value: String(record.id) },
       { trait_type: "seed",    value: String(record.seed) }
