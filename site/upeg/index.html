@@ -75,6 +75,8 @@
   <input id="walletInput" placeholder="0x… wallet address" autocomplete="off" spellcheck="false">
   <button id="walletGo">look up wallet</button>
   <button id="walletClear" style="display:none">← back to all</button>
+  <input id="idInput" placeholder="uPEG # (e.g. 56495)" autocomplete="off" spellcheck="false" style="min-width:160px">
+  <button id="idGo">find by id</button>
 </div>
 <div class="toolbar">
   <button id="filterAll" class="on">all</button>
@@ -568,6 +570,74 @@ $clear.onclick = async () => {
 $wGo.onclick = () => openWallet($wIn.value);
 $wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.value); });
 $wClear.onclick = exitWallet;
+
+// --- find by id (reads _upegs[id] storage slot directly) ---
+async function findById(idStr) {
+  const $st = document.getElementById("status");
+  const id = Number(idStr);
+  if (!Number.isInteger(id) || id < 1) {
+    $st.textContent = "invalid id — enter a positive integer like 56495";
+    return;
+  }
+  $st.textContent = `looking up uPEG #${id}…`;
+
+  // _upegs is mapping(uint256 => uint256) at slot 0 of UpegToken.
+  // storage key = keccak256(abi.encode(id, 0))
+  const { keccak_256 } = await import("https://esm.sh/js-sha3@0.9.3");
+  const idHex = BigInt(id).toString(16).padStart(64, "0");
+  const slotHex = "0".repeat(64);
+  const concatBytes = new Uint8Array(64);
+  const concat = idHex + slotHex;
+  for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
+  const storageKey = "0x" + keccak_256(concatBytes);
+
+  // eth_getStorageAt
+  let seedHex;
+  try {
+    const res = await fetch(RPC, {
+      method: "POST", headers: {"content-type":"application/json"},
+      body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method:"eth_getStorageAt",
+                              params:[TOKEN, storageKey, "latest"] })
+    });
+    seedHex = (await res.json()).result;
+  } catch (e) {
+    $st.textContent = "RPC error: " + e.message;
+    return;
+  }
+  if (!seedHex || seedHex === "0x" + "0".repeat(64)) {
+    $st.textContent = `uPEG #${id} not found — burned or never existed`;
+    return;
+  }
+  const seed = BigInt(seedHex).toString();
+
+  // Render SVG via hook.generate(seed)
+  let svg;
+  try {
+    svg = decodeString(await call(HOOK, callGenerate(seed)));
+  } catch (e) {
+    $st.textContent = "SVG render failed: " + e.message;
+    return;
+  }
+
+  // Cache + render + open modal
+  const now = Date.now();
+  const ex = cellsById.get(id);
+  const record = {
+    id, seed, svg,
+    holder: ex?.record?.holder || "0x0000000000000000000000000000000000000000",
+    status: "alive",
+    firstSeenAt: ex?.record?.firstSeenAt || now,
+    lastSeenAt: now
+  };
+  if (db) await dbBulkPut(db, [record]);
+  renderCell(record);
+  openModal(record);
+  $st.textContent = `found uPEG #${id} — ready to mint`;
+}
+const $idIn = document.getElementById("idInput");
+const $idGo = document.getElementById("idGo");
+$idGo.onclick = () => findById($idIn.value);
+$idIn.addEventListener("keydown", e => { if (e.key === "Enter") findById($idIn.value); });
 
 // --- mint as ethscription (with AppChain collection) ---
 // Two paths:
