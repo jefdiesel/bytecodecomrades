@@ -97,6 +97,7 @@
         mint as ethscription
       </button>
       <div id="mintStatus" style="font-size:11px;color:#8a8f99;margin-top:6px;line-height:1.5;word-break:break-all"></div>
+      <button id="resetWallet" style="background:transparent;color:#888;border:none;padding:4px 0;font:inherit;font-size:10px;cursor:pointer;text-decoration:underline">change wallet</button>
     </div>
   </div>
 </div>
@@ -677,38 +678,55 @@ window.dispatchEvent(new Event("eip6963:requestProvider"));
 // Phantom-EVM frequently throws -32603 on eth_requestAccounts when its EVM
 // mode isn't enabled — but if the user has another wallet installed too
 // (MetaMask, Rabby, Coinbase), this falls through to it instead of dying.
-async function connectAnyWallet() {
+function listAllWallets() {
   const candidates = [];
-  // EIP-6963: modern multi-wallet discovery
-  for (const w of announcedWallets) candidates.push({ provider: w.provider, name: w.info?.name });
-  // Legacy: window.ethereum + .providers
+  for (const w of announcedWallets) candidates.push({ provider: w.provider, name: w.info?.name || providerName(w.provider) });
   if (Array.isArray(window.ethereum?.providers)) {
     for (const p of window.ethereum.providers) candidates.push({ provider: p, name: providerName(p) });
   } else if (window.ethereum) {
     candidates.push({ provider: window.ethereum, name: providerName(window.ethereum) });
   }
-  // Dedup
   const seen = new Set(); const uniq = [];
   for (const c of candidates) { if (!seen.has(c.provider)) { seen.add(c.provider); uniq.push(c); } }
-  if (uniq.length === 0) throw new Error("no wallet detected — install MetaMask, Rabby, Rainbow, etc.");
+  return uniq;
+}
 
-  // Sort: non-Phantom first since Phantom-EVM is the usual culprit
-  uniq.sort((a, b) => (a.provider.isPhantom ? 1 : 0) - (b.provider.isPhantom ? 1 : 0));
-
-  let lastErr;
-  for (const c of uniq) {
-    try {
-      const accounts = await c.provider.request({ method: "eth_requestAccounts" });
-      if (accounts?.length) {
-        console.log("[upeg-mint] connected via", c.name);
-        return { provider: c.provider, name: c.name, account: accounts[0] };
-      }
-    } catch (e) {
-      console.warn("[upeg-mint]", c.name, "refused:", e?.message || e);
-      lastErr = e;
-    }
+// Lazy wallet picker — opens a tiny inline picker if >1 wallet, else uses the only one
+let _chosenWallet = null;
+async function pickWallet() {
+  if (_chosenWallet) return _chosenWallet;
+  const wallets = listAllWallets();
+  if (wallets.length === 0) throw new Error("no wallet detected — install MetaMask, Rabby, Phantom, Rainbow, etc.");
+  if (wallets.length === 1) {
+    const accounts = await wallets[0].provider.request({ method: "eth_requestAccounts" });
+    _chosenWallet = { provider: wallets[0].provider, name: wallets[0].name, account: accounts[0] };
+    return _chosenWallet;
   }
-  throw lastErr || new Error("all wallets refused to connect");
+  // Show picker
+  return new Promise((resolve, reject) => {
+    const picker = document.createElement("div");
+    picker.style.cssText = "position:fixed;inset:0;background:#000c;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px";
+    picker.innerHTML = `<div style="background:#16181d;border-radius:6px;padding:18px;max-width:340px;width:100%">
+      <div style="font-size:14px;color:#fff;margin-bottom:4px">choose wallet</div>
+      <div style="font-size:11px;color:#888;margin-bottom:12px">${wallets.length} detected</div>
+      ${wallets.map((w,i) => `<button data-idx="${i}" style="display:block;width:100%;text-align:left;background:#1d2026;color:#e8e8e8;border:1px solid #2a2e36;padding:10px 14px;border-radius:3px;font:inherit;font-size:13px;cursor:pointer;margin-bottom:6px">${w.name}</button>`).join("")}
+      <button id="pickerCancel" style="display:block;width:100%;background:transparent;color:#888;border:none;padding:8px;font:inherit;font-size:11px;cursor:pointer;margin-top:6px">cancel</button>
+    </div>`;
+    document.body.appendChild(picker);
+    picker.addEventListener("click", async (ev) => {
+      if (ev.target.id === "pickerCancel" || ev.target === picker) {
+        picker.remove(); reject(new Error("user cancelled wallet pick"));
+      } else if (ev.target.dataset.idx != null) {
+        const w = wallets[+ev.target.dataset.idx];
+        picker.remove();
+        try {
+          const accounts = await w.provider.request({ method: "eth_requestAccounts" });
+          _chosenWallet = { provider: w.provider, name: w.name, account: accounts[0] };
+          resolve(_chosenWallet);
+        } catch (e) { reject(e); }
+      }
+    });
+  });
 }
 function providerName(p) {
   if (p.isMetaMask) return "MetaMask";
@@ -755,7 +773,7 @@ async function mintEthscription() {
     } catch (_) { /* non-fatal */ }
 
     $st.textContent = "connecting wallet…";
-    const conn = await connectAnyWallet();
+    const conn = await pickWallet();
     const wallet = conn.provider;
     const from = conn.account;
     $st.textContent = `connected via ${conn.name}`;
@@ -861,6 +879,10 @@ async function mintEthscription() {
   }
 }
 document.getElementById("mintBtn").onclick = mintEthscription;
+document.getElementById("resetWallet").onclick = () => {
+  _chosenWallet = null;
+  document.getElementById("mintStatus").textContent = "wallet cleared — click mint to choose again";
+};
 
 // --- scroll ---
 const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
