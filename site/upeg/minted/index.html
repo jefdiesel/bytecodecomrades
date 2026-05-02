@@ -187,10 +187,62 @@ function saveCache(collectionId, lastBlock, itemList) {
   catch (e) { console.warn("cache save failed:", e); }
 }
 
+// Try the official v2 API first — instant if it works.
+// Endpoint shape inferred: ?collection_id=0x... returns ethscriptions in collection.
+// Response shape: assume array or { data: [...] } / { result: [...] } / { ethscriptions: [...] }.
+async function tryApiV2(collectionId) {
+  const url = `https://api-v2.ethscriptions.com/ethscriptions?collection_id=${collectionId}&per_page=200`;
+  const collected = [];
+  let page = 1;
+  for (let i = 0; i < 30; i++) {  // safety cap
+    let pageUrl = url + "&page=" + page;
+    let res;
+    try { res = await fetch(pageUrl, { signal: AbortSignal.timeout(8000) }); }
+    catch (e) { console.warn("[api-v2] fetch failed:", e.message); return null; }
+    if (!res.ok) { console.warn("[api-v2] status:", res.status); return null; }
+    const j = await res.json();
+    const arr = Array.isArray(j) ? j : (j.data || j.result || j.ethscriptions || j.items || []);
+    if (!arr.length) break;
+    collected.push(...arr);
+    if (arr.length < 200) break;
+    page++;
+  }
+  console.log("[api-v2] got", collected.length, "items, sample:", collected[0]);
+  // Map API shape -> our internal item shape
+  return collected.map(e => {
+    const txHash = e.transaction_hash || e.ethscription_id || e.id || e.tx_hash;
+    const owner = e.current_owner || e.owner || e.initial_owner || "0x0000000000000000000000000000000000000000";
+    const blockNumber = e.block_number || 0;
+    const contentUri = e.content_uri || e.contentURI || e.data_uri || e.dataUri;
+    let json = null, svg = null;
+    if (contentUri) {
+      const parsed = parseDataURI(contentUri);
+      json = parsed.json;
+      svg = parsed.svg;
+    }
+    return {
+      upegId: json?.item?.item_index || e.item_index || "?",
+      owner, txHash, blockNumber, json, svg
+    };
+  }).filter(it => it.svg);  // drop entries we couldn't parse
+}
+
 async function scanCollection(collectionId) {
   $grid.innerHTML = "";
   items.length = 0;
   $counts.textContent = "";
+
+  // 0. Try the v2 API first (much faster than scanning logs)
+  $status.textContent = "trying official API…";
+  const apiItems = await tryApiV2(collectionId);
+  if (apiItems && apiItems.length > 0) {
+    for (const it of apiItems) { items.push(it); renderItem(it); }
+    $status.textContent = `✓ ${items.length} items from api-v2.ethscriptions.com`;
+    $counts.textContent = `${items.length} items in collection`;
+    saveCache(collectionId, 0, items);
+    return;
+  }
+  $status.textContent = "API unavailable / empty — falling back to L1 event scan…";
 
   // 1. Render cached items immediately (instant on repeat visits)
   const cache = loadCache(collectionId);
