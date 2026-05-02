@@ -725,14 +725,15 @@ async function mintEthscription() {
       $st.textContent = "signing…";
       const priceHex = await call(ETHSCRIBER_CONTRACT, ETHSCRIBER_SEL.currentPrice);
       const price = BigInt(priceHex);
+      // 3M gas: actual on-chain measured 1.475M for mint (heavy on-chain Base64
+      // + string concat + log emit). Generous buffer prevents wallet estimators
+      // from rejecting the tx as "too tight". Unused gas refunds automatically.
       txParams = {
         from,
         to: ETHSCRIBER_CONTRACT,
         value: "0x" + price.toString(16),
         data: encodeMintCalldata(r.id, r.seed),
-        // Hardcoded gas because the on-chain Base64+concat work is heavy.
-        // Measured ~1.09M gas; 1.5M = 38% buffer. Refund of unused gas is automatic.
-        gas: "0x16e360" // 1,500,000
+        gas: "0x2dc6c0" // 3,000,000
       };
     } else {
       // EOA path: zero-value self-tx, calldata = hex(dataURI). Used for genesis
