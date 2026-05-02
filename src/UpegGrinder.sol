@@ -9,13 +9,6 @@ import {Currency}         from "v4-core/types/Currency.sol";
 import {BalanceDelta}     from "v4-core/types/BalanceDelta.sol";
 import {TickMath}         from "v4-core/libraries/TickMath.sol";
 
-interface IERC20Min {
-    function transfer(address to, uint256 amount) external returns (bool);
-}
-interface IWETH9 {
-    function deposit() external payable;
-    function transfer(address, uint256) external returns (bool);
-}
 interface IUpegToken {
     function OwnerUpegsCount(address owner) external view returns (uint256);
     function OwnerUpeg(address owner, uint256 index) external view returns (uint256 id, uint256 seed);
@@ -88,9 +81,11 @@ contract UpegGrinder is IUnlockCallback {
 
     IPoolManager constant PM    = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
     IUpegToken   constant UPEG  = IUpegToken(0x44b28991B167582F18BA0259e0173176ca125505);
-    IWETH9       constant WETH  = IWETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IHooks       constant HOOK  = IHooks(0xe54082DfBf044B6a8F584bdDdb90a22d5613C440);
-
+    // Pool config (extracted from a real V4 router swap calldata):
+    //   currency0 = address(0) (native ETH)
+    //   currency1 = UPEG
+    //   fee = 10000 (1%), tickSpacing = 60, hook = HOOK
     PoolKey public key;
 
     /// @notice Pack a "rarity gate". A unicorn matches if ALL non-zero
@@ -112,7 +107,7 @@ contract UpegGrinder is IUnlockCallback {
 
     struct CB {
         address  sender;
-        uint256  maxWeth;
+        uint256  maxEthIn;
         uint256  ethProvided;
         uint256  countBefore;
         Criteria criteria;
@@ -126,12 +121,11 @@ contract UpegGrinder is IUnlockCallback {
     error RefundFailed();
 
     constructor() {
-        // UPEG (0x44b2...) < WETH (0xC02a...) → UPEG = currency0, WETH = currency1
-        require(address(UPEG) < address(WETH), "address ordering");
+        // Native ETH (currency0) / UPEG (currency1) at fee=1%, tickSpacing=60.
         key = PoolKey({
-            currency0:   Currency.wrap(address(UPEG)),
-            currency1:   Currency.wrap(address(WETH)),
-            fee:         3000,
+            currency0:   Currency.wrap(address(0)),     // native ETH
+            currency1:   Currency.wrap(address(UPEG)),
+            fee:         10000,
             tickSpacing: 60,
             hooks:       HOOK
         });
@@ -145,7 +139,7 @@ contract UpegGrinder is IUnlockCallback {
         uint256 countBefore = UPEG.OwnerUpegsCount(msg.sender);
         PM.unlock(abi.encode(CB({
             sender:      msg.sender,
-            maxWeth:     maxEthIn,
+            maxEthIn:    maxEthIn,
             ethProvided: msg.value,
             countBefore: countBefore,
             criteria:    c
@@ -156,32 +150,29 @@ contract UpegGrinder is IUnlockCallback {
         if (msg.sender != address(PM)) revert WrongCallback();
         CB memory p = abi.decode(raw, (CB));
 
-        // Exact-output 1.0 uPEG. zeroForOne=false (WETH→UPEG; UPEG=currency0).
+        // Exact-output 1.0 uPEG. zeroForOne=true (ETH→UPEG; ETH=currency0, UPEG=currency1).
         IPoolManager.SwapParams memory sp = IPoolManager.SwapParams({
-            zeroForOne:        false,
+            zeroForOne:        true,
             amountSpecified:   int256(1e18),                    // positive = exact-output
-            sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
         });
         BalanceDelta delta = PM.swap(key, sp, "");
-        int256 d0 = int256(delta.amount0());  // UPEG
-        int256 d1 = int256(delta.amount1());  // WETH
+        int256 d0 = int256(delta.amount0());  // ETH (we owe, negative)
+        int256 d1 = int256(delta.amount1());  // UPEG (we receive, positive)
 
-        // Buying UPEG: pool gives us +d0 UPEG, we owe -d1 WETH
-        if (d0 <= 0 || d1 >= 0) revert UnexpectedDelta();
-        uint256 wethOwed = uint256(-d1);
-        if (wethOwed > p.maxWeth) revert MaxInputExceeded();
+        // Buying UPEG with ETH: pool gives us +d1 UPEG, we owe -d0 ETH
+        if (d1 <= 0 || d0 >= 0) revert UnexpectedDelta();
+        uint256 ethOwed = uint256(-d0);
+        if (ethOwed > p.maxEthIn) revert MaxInputExceeded();
 
-        // Settle WETH (wrap from ETH on hand)
-        PM.sync(key.currency1);
-        WETH.deposit{value: wethOwed}();
-        require(WETH.transfer(address(PM), wethOwed), "weth.transfer");
-        PM.settle();
+        // Settle native ETH directly (V4 supports native — no WETH wrap needed)
+        PM.settle{value: ethOwed}();
 
         // Take UPEG → user. This triggers UpegToken._afterTokenTransfer (from=PM,
         // to=user) which mints fresh unicorns to the user using the hook's
         // current seed.
-        uint256 upegOut = uint256(d0);
-        PM.take(key.currency0, p.sender, upegOut);
+        uint256 upegOut = uint256(d1);
+        PM.take(key.currency1, p.sender, upegOut);
 
         // Inspect what was minted
         uint256 countAfter = UPEG.OwnerUpegsCount(p.sender);
@@ -196,7 +187,7 @@ contract UpegGrinder is IUnlockCallback {
 
         // Hit. Refund unspent ETH.
         uint256 refund;
-        unchecked { refund = p.ethProvided - wethOwed; }
+        unchecked { refund = p.ethProvided - ethOwed; }
         if (refund > 0) {
             (bool ok, ) = p.sender.call{value: refund}("");
             if (!ok) revert RefundFailed();

@@ -18,7 +18,7 @@ contract UpegGrinderTest is Test {
         // Fork mainnet at a recent block (only runs if FORK_URL env set)
         vm.createSelectFork(vm.envOr("FORK_URL", string("")));
         grinder = new UpegGrinder();
-        vm.deal(user, 1 ether);
+        vm.deal(user, 100 ether);
     }
 
     function test_grindWithoutFilterAlwaysSucceeds() public {
@@ -39,7 +39,7 @@ contract UpegGrinderTest is Test {
         uint256 countBefore = IUpegRead(UPEG).OwnerUpegsCount(user);
 
         vm.prank(user);
-        grinder.grind{value: 0.01 ether}(0.01 ether, open);
+        grinder.grind{value: 50 ether}(50 ether, open);
 
         uint256 countAfter = IUpegRead(UPEG).OwnerUpegsCount(user);
         assertEq(countAfter, countBefore + 1, "should mint exactly 1");
@@ -68,7 +68,7 @@ contract UpegGrinderTest is Test {
         uint256 countBefore = IUpegRead(UPEG).OwnerUpegsCount(user);
 
         bool reverted = false;
-        try this.callGrind(0.01 ether, wantWings) {
+        try this.callGrind(50 ether, wantWings) {
             uint256 countAfter = IUpegRead(UPEG).OwnerUpegsCount(user);
             // If it didn't revert, the mint must satisfy criteria
             (, uint256 seed) = IUpegRead(UPEG).OwnerUpeg(user, countBefore);
