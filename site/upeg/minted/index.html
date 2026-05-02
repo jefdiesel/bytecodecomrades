@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG Unicorns — minted into collection</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; word-break: break-all; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  #status { color: #8a8f99; font-size: 12px; margin: 12px 0; min-height: 16px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .card { background: #16181d; border-radius: 4px; padding: 0; overflow: hidden; cursor: pointer; }
+  .card .art { aspect-ratio: 1; background: #0b0c10; image-rendering: pixelated; }
+  .card .art svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .card .meta { padding: 6px 8px; font-size: 11px; line-height: 1.5; }
+  .card .meta .id { color: #fff; font-weight: 600; }
+  .card .meta .traits { color: #8a8f99; }
+  .card .meta .owner { color: #6cf; }
+  .empty { color: #666; padding: 40px; text-align: center; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 16px; font-size: 12px; }
+  .toolbar input { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36; padding: 5px 10px; border-radius: 3px; font: inherit; min-width: 480px; }
+  .toolbar button { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36; padding: 5px 10px; border-radius: 3px; cursor: pointer; font: inherit; }
+  .toolbar button:hover { background: #262a32; }
+  /* modal */
+  #modal { position: fixed; inset: 0; background: #000c; display: none;
+           align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  #modal.on { display: flex; }
+  #modal .box { background: #16181d; border-radius: 6px; padding: 18px;
+                max-width: 460px; width: 100%; max-height: 90vh; overflow: auto; }
+  #modal .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+                background: #0b0c10; border-radius: 4px; margin-bottom: 12px; }
+  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.7; }
+  #modal .meta b { color: #fff; }
+  #modal .meta a { color: #6cf; text-decoration: none; }
+  #modal .x { float: right; color: #888; cursor: pointer; padding: 0 4px; }
+  #modal .traits { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 8px; font-size: 11px; }
+  #modal .traits .trait { background: #0b0c10; padding: 4px 6px; border-radius: 3px; }
+  #modal .traits .trait .k { color: #888; }
+  #modal .traits .trait .v { color: #fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG Unicorns — minted into collection</h1>
+  <div class="sub">
+    bypassing the AppChain indexer (38d behind). reads ESIP-3 mint events directly from L1 via your <a href="/api/rpc?chain=eth-mainnet">RPC proxy</a>, decodes the on-chain Data URI, renders here.
+    <br>← <a href="/upeg">back to gallery</a>
+  </div>
+</header>
+
+<div class="toolbar">
+  <input id="cidInput" placeholder="collection_id (0x...)" autocomplete="off" spellcheck="false">
+  <button id="cidGo">load</button>
+  <span id="counts" style="color:#8a8f99"></span>
+</div>
+
+<div id="status">loading…</div>
+<div id="grid"></div>
+
+<div id="modal" onclick="if(event.target.id==='modal')this.classList.remove('on')">
+  <div class="box">
+    <span class="x" onclick="document.getElementById('modal').classList.remove('on')">✕</span>
+    <div class="art" id="modalArt"></div>
+    <div class="meta" id="modalMeta"></div>
+    <div class="traits" id="modalTraits"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const RPC = "/api/rpc?chain=eth-mainnet";
+const ETHSCRIBER = "0x1afc28694055efe4e1d5b4b0b042fb0f81d80edd";
+const SCAN_FROM_BLOCK = 25004636;
+// keccak256("ethscriptions_protocol_CreateEthscription(address,string)")
+const EVENT_TOPIC = "0x665fba0baf3dc33e9943340197893ac16f56482c2defb8de60f944987fee451c";
+const DEFAULT_COLLECTION_ID = "0x13d703858b162a144ec5d38b05726d39893a607a5bd070c84e795f208ebdfcab";
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params })
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  return j.result;
+}
+
+// Decode ABI-encoded string from log.data
+// Layout: offset(0x20) | length | utf-8 bytes padded to 32-byte boundary
+function decodeStringFromLogData(hexData) {
+  const data = hexData.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  const utf8 = data.slice(128, 128 + len * 2);
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = parseInt(utf8.slice(i*2, i*2+2), 16);
+  return new TextDecoder().decode(bytes);
+}
+
+// Parse a header-form Data URI; return parsed JSON + b64-svg
+function parseDataURI(uri) {
+  // data:image/svg+xml;rule=esip6;p=...;op=...;d=<b64>;base64,<b64svg>
+  const headerEnd = uri.indexOf(",");
+  const header = uri.slice(0, headerEnd);
+  const body = uri.slice(headerEnd + 1);
+  const dMatch = header.match(/;d=([^;]+)/);
+  const opMatch = header.match(/;op=([^;]+)/);
+  const pMatch = header.match(/;p=([^;]+)/);
+  let json = null;
+  if (dMatch) {
+    try { json = JSON.parse(atob(dMatch[1])); } catch { /* ignore */ }
+  }
+  let svg = null;
+  if (header.endsWith(";base64") || header.includes(";base64,")) {
+    try { svg = atob(body); } catch { /* ignore */ }
+  } else {
+    svg = decodeURIComponent(body);
+  }
+  return { protocol: pMatch?.[1], op: opMatch?.[1], json, svg };
+}
+
+const $status = document.getElementById("status");
+const $grid = document.getElementById("grid");
+const $cid = document.getElementById("cidInput");
+const $cidGo = document.getElementById("cidGo");
+const $counts = document.getElementById("counts");
+const $modal = document.getElementById("modal");
+const $mArt = document.getElementById("modalArt");
+const $mMeta = document.getElementById("modalMeta");
+const $mTraits = document.getElementById("modalTraits");
+
+const items = []; // { upegId, owner, txHash, blockNumber, traits, svg, json }
+
+function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
+
+function openItem(item) {
+  $mArt.innerHTML = item.svg || "";
+  $mMeta.innerHTML =
+    `<b>uPEG #${item.upegId}</b><br>` +
+    `owner: <a href="https://etherscan.io/address/${item.owner}" target="_blank" rel="noopener">${fmtAddr(item.owner)}</a><br>` +
+    `tx: <a href="https://etherscan.io/tx/${item.txHash}" target="_blank" rel="noopener">${item.txHash.slice(0,10)}…</a><br>` +
+    `block: ${item.blockNumber}<br>` +
+    `<a href="https://ethscriptions.com/ethscriptions/${item.txHash}" target="_blank" rel="noopener">view on ethscriptions.com →</a>`;
+  $mTraits.innerHTML = (item.json?.item?.attributes || []).map(a =>
+    `<div class="trait"><span class="k">${a.trait_type}</span> <span class="v">${a.value}</span></div>`
+  ).join("");
+  $modal.classList.add("on");
+}
+
+function renderItem(item) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const traitCount = (item.json?.item?.attributes || []).find(a => a.trait_type === "optional_trait_count")?.value || "?";
+  card.innerHTML =
+    `<div class="art">${item.svg || ""}</div>
+     <div class="meta">
+       <div class="id">#${item.upegId}</div>
+       <div class="traits">${traitCount} optional traits</div>
+       <div class="owner">${fmtAddr(item.owner)}</div>
+     </div>`;
+  card.addEventListener("click", () => openItem(item));
+  $grid.appendChild(card);
+}
+
+async function scanCollection(collectionId) {
+  $grid.innerHTML = "";
+  items.length = 0;
+  $status.textContent = `scanning chain for events targeting collection ${collectionId.slice(0,12)}…`;
+  $counts.textContent = "";
+
+  // Get current block
+  const latestHex = await rpc("eth_blockNumber");
+  const latest = parseInt(latestHex, 16);
+
+  // Scan in 10-block chunks (free Alchemy tier limit)
+  let scanned = 0;
+  const totalBlocks = latest - SCAN_FROM_BLOCK + 1;
+  let logsTotal = 0;
+
+  for (let from = SCAN_FROM_BLOCK; from <= latest; from += 10) {
+    const to = Math.min(from + 9, latest);
+    let logs;
+    try {
+      logs = await rpc("eth_getLogs", [{
+        address: ETHSCRIBER,
+        fromBlock: "0x" + from.toString(16),
+        toBlock:   "0x" + to.toString(16),
+        topics: [EVENT_TOPIC]
+      }]);
+    } catch (e) {
+      console.warn("getLogs failed for", from, "-", to, ":", e.message);
+      continue;
+    }
+
+    for (const log of logs) {
+      try {
+        const owner = "0x" + log.topics[1].slice(26);
+        const uri = decodeStringFromLogData(log.data);
+        const parsed = parseDataURI(uri);
+        if (!parsed.json) continue;
+        // filter to this collection
+        if (parsed.json.collection_id?.toLowerCase() !== collectionId.toLowerCase()) continue;
+        const upegId = parsed.json.item?.item_index;
+        if (!upegId) continue;
+        const item = {
+          upegId,
+          owner,
+          txHash: log.transactionHash,
+          blockNumber: parseInt(log.blockNumber, 16),
+          json: parsed.json,
+          svg: parsed.svg
+        };
+        items.push(item);
+        renderItem(item);
+        logsTotal++;
+      } catch (e) {
+        console.warn("decode failed:", e);
+      }
+    }
+    scanned = to - SCAN_FROM_BLOCK + 1;
+    $status.textContent = `scanned ${scanned.toLocaleString()} / ${totalBlocks.toLocaleString()} blocks · ${logsTotal} mints found`;
+    $counts.textContent = `${items.length} items in collection`;
+  }
+
+  // Genesis is a separate L1 calldata tx, not via our contract — add it manually
+  // if collection_id is the default uPEG one and we know its details.
+  if (collectionId.toLowerCase() === DEFAULT_COLLECTION_ID.toLowerCase()) {
+    if (!items.find(i => i.upegId === "19125")) {
+      // We know the genesis put #19125 as item #1
+      $status.textContent += " · adding genesis";
+      try {
+        const tx = await rpc("eth_getTransactionByHash", [DEFAULT_COLLECTION_ID]);
+        if (tx) {
+          const data = tx.input.replace(/^0x/, "");
+          const bytes = new Uint8Array(data.length / 2);
+          for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(data.slice(i*2, i*2+2), 16);
+          const uri = new TextDecoder().decode(bytes);
+          const parsed = parseDataURI(uri);
+          if (parsed.json) {
+            const genesis = {
+              upegId: parsed.json.item?.item_index || "19125",
+              owner: tx.to,
+              txHash: tx.hash,
+              blockNumber: parseInt(tx.blockNumber, 16),
+              json: { collection_id: collectionId, item: parsed.json.item },
+              svg: parsed.svg
+            };
+            items.unshift(genesis);
+            // re-render at top
+            $grid.innerHTML = "";
+            for (const it of items) renderItem(it);
+          }
+        }
+      } catch (e) { console.warn("genesis fetch failed:", e); }
+    }
+  }
+
+  if (items.length === 0) {
+    $status.textContent = `scan complete · 0 items found in this collection (yet)`;
+    $grid.innerHTML = `<div class="empty">no mints yet for this collection</div>`;
+  } else {
+    $status.textContent = `✓ scan complete · ${items.length} items in collection ${collectionId.slice(0,12)}…`;
+    $counts.textContent = `${items.length} items`;
+  }
+}
+
+// init: read ?collection= URL param or default
+const urlCid = new URLSearchParams(location.search).get("collection") || DEFAULT_COLLECTION_ID;
+$cid.value = urlCid;
+$cidGo.onclick = () => {
+  const cid = $cid.value.trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(cid)) { $status.textContent = "invalid collection_id"; return; }
+  history.replaceState(null, "", "?collection=" + cid);
+  scanCollection(cid);
+};
+$cid.addEventListener("keydown", e => { if (e.key === "Enter") $cidGo.click(); });
+
+scanCollection(urlCid).catch(e => { $status.textContent = "error: " + e.message; });
+</script>
+</body>
+</html>
