@@ -676,7 +676,7 @@ const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
 // On-chain ethscriber: builds the AppChain Data URI in Solidity so calldata
 // stays tiny (~64 bytes for upegId + seed). Required because Phantom-EVM
 // rejects mint(string) calls with multi-KB string args.
-const ETHSCRIBER_CONTRACT = "0xf196bdf2a6254487aa96ead832fd9f66f6509eed";
+const ETHSCRIBER_CONTRACT = "0x1afc28694055efe4e1d5b4b0b042fb0f81d80edd"; // v3: traits + spec-clean
 const ETHSCRIBER_SEL = {
   currentPrice: "0x9d1b464a",   // currentPrice()
   mint:         "0x1b2ef1ca"    // mint(uint256,uint256) — (upegId, seed)
@@ -855,20 +855,29 @@ async function mintEthscription() {
   try {
     const dataURI = buildCollectionDataURI(r.svg, op, payload);
 
-    // uniqueness pre-check by SHA256 of the full Data URI
-    $st.textContent = "checking if this unicorn is already ethscribed…";
+    // ITEM-LEVEL dupe check — query the AppChain API for whether item_index r.id
+    // is already taken in this collection. The protocol enforces uniqueness on
+    // item_index per collection, so this catches dupes BEFORE the user pays.
+    $st.textContent = "checking if uPEG #" + r.id + " is already in the collection…";
     try {
-      const sha = await sha256Hex(dataURI);
-      const existsRes = await fetch(`https://api.ethscriptions.com/v2/ethscriptions/exists/${sha}`);
-      const existsJson = await existsRes.json();
-      if (existsJson?.result?.exists) {
-        const existing = existsJson.result.ethscription;
-        $st.innerHTML =
-          `already ethscribed → <a href="https://ethscriptions.com/ethscriptions/${existing.transaction_hash}" target="_blank" rel="noopener">view it</a>`;
-        $btn.disabled = false;
-        return;
+      const checkRes = await fetch(
+        `https://api.ethscriptions.com/v2/tokens/erc-721-ethscriptions-collection/${COLLECTION_ID}/items?item_index=${r.id}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (checkRes.ok) {
+        const checkJson = await checkRes.json();
+        const items = checkJson?.result || checkJson?.items || [];
+        if (items.length > 0) {
+          const ex = items[0];
+          $st.innerHTML =
+            `<b>uPEG #${r.id} is already in the collection.</b><br>` +
+            `owned by <a href="https://etherscan.io/address/${ex.owner || ex.current_owner}" target="_blank" rel="noopener">${(ex.owner||ex.current_owner||'').slice(0,10)}…</a>` +
+            (ex.transaction_hash ? ` · <a href="https://ethscriptions.com/ethscriptions/${ex.transaction_hash}" target="_blank" rel="noopener">view</a>` : '');
+          $btn.disabled = false;
+          return;
+        }
       }
-    } catch (_) { /* non-fatal */ }
+    } catch (_) { /* non-fatal — proceed; AppChain will reject if dupe */ }
 
     $st.textContent = "connecting wallet…";
     const conn = await pickWallet();
