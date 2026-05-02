@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG — seed grinder</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.5; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  .cols { display: grid; grid-template-columns: 320px 1fr; gap: 24px; margin-top: 16px; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; }
+  .panel h2 { font-size: 12px; margin: 0 0 10px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .row label { color: #ccc; cursor: pointer; user-select: none; }
+  .row input[type=checkbox] { accent-color: #6cf; }
+  .row input[type=number] { background: #0b0c10; color: #e8e8e8; border: 1px solid #2a2e36; padding: 3px 6px; border-radius: 3px; width: 60px; font: inherit; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277; padding: 8px 14px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  button.danger { background: #4a2a2a; border-color: #7a4242; }
+  button.success { background: #2a4a2a; border-color: #427a42; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  #log { font-size: 11px; line-height: 1.6; color: #888; max-height: 240px; overflow-y: auto; padding: 8px; background: #0b0c10; border-radius: 3px; margin-top: 10px; }
+  #log .ok { color: #6f6; }
+  #log .miss { color: #f66; }
+  #log .info { color: #888; }
+  #recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+  .card { aspect-ratio: 1; background: #16181d; border-radius: 3px; position: relative; overflow: hidden; }
+  .card svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .card .tag { position: absolute; bottom: 2px; right: 4px; background: #000c; color: #fff; padding: 1px 4px; font-size: 9px; border-radius: 2px; }
+  .card.match { box-shadow: 0 0 0 2px #6f6; }
+  .stat { display: flex; gap: 16px; font-size: 12px; padding: 6px 0; color: #888; flex-wrap: wrap; }
+  .stat .v { color: #fff; font-weight: 600; }
+  #connect { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36; }
+  .pill { display: inline-block; background: #2a3548; color: #ccf; padding: 2px 6px; border-radius: 2px; font-size: 10px; }
+  details { margin-top: 8px; font-size: 11px; }
+  details summary { color: #888; cursor: pointer; }
+  details ol { margin: 6px 0 0 0; padding-left: 16px; line-height: 1.7; color: #ccc; }
+  details code { background: #0b0c10; padding: 1px 4px; border-radius: 2px; color: #6cf; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG — seed grinder</h1>
+  <div class="sub">
+    Exploits the deterministic seed in <a href="https://etherscan.io/address/0xe54082DfBf044B6a8F584bdDdb90a22d5613C440" target="_blank" rel="noopener">UpegHook</a>'s <code>_randomSeed</code> (keccak of mostly-public inputs).
+    Each swap mints a unicorn; this page watches your wallet, decodes the new mint's traits, and tells you to keep or sell back.
+    <br><span class="pill">v0</span> manual mode — you swap on <a href="https://unipeg.art/swap" target="_blank" rel="noopener">unipeg.art</a>, this watches.
+    <br>← <a href="/upeg">back to gallery</a>
+  </div>
+</header>
+
+<div class="cols">
+
+  <!-- LEFT: criteria + control -->
+  <div class="panel">
+    <h2>rarity gate</h2>
+    <div class="row"><label><input type="checkbox" id="reqWings"> require wings</label></div>
+    <div class="row"><label><input type="checkbox" id="reqHorn"> require horn</label></div>
+    <div class="row"><label><input type="checkbox" id="reqHair"> require hair</label></div>
+    <div class="row"><label><input type="checkbox" id="reqGround"> require ground</label></div>
+    <div class="row"><label><input type="checkbox" id="reqTail"> require tail</label></div>
+    <div class="row"><label><input type="checkbox" id="reqAcc"> require accessories</label></div>
+    <div class="row" style="margin-top:8px"><label>max optional traits</label><input type="number" id="maxOpt" value="6" min="0" max="6"></div>
+    <div class="row"><label>specific bg color</label><input type="number" id="bgVal" placeholder="any" min="0" max="255"></div>
+
+    <h2 style="margin-top: 16px">grinder</h2>
+    <div class="row" style="display:block">
+      <button id="connect">connect wallet</button>
+    </div>
+    <div class="row" style="display:block;margin-top:6px">
+      <button id="watchToggle" disabled>start watching</button>
+    </div>
+    <div class="row" style="display:block;margin-top:6px">
+      <a href="https://unipeg.art/swap" target="_blank" rel="noopener" style="color:#6cf">→ open unipeg.art swap</a>
+    </div>
+
+    <details>
+      <summary>how to grind</summary>
+      <ol>
+        <li>pick rarity gate above</li>
+        <li>connect your wallet → click <code>start watching</code></li>
+        <li>open unipeg.art and buy <em>1 uPEG</em></li>
+        <li>this page shows the resulting unicorn within 10s</li>
+        <li>if it matches → <span class="ok">keep</span>. if not → <span class="miss">sell on unipeg.art</span> (burns it, refunds most ETH)</li>
+        <li>repeat until you hit a match</li>
+      </ol>
+    </details>
+  </div>
+
+  <!-- RIGHT: stats + recent -->
+  <div class="panel">
+    <h2>stats</h2>
+    <div class="stat">
+      <span>connected: <span class="v" id="addr">—</span></span>
+      <span>balance: <span class="v" id="bal">—</span></span>
+      <span>unicorns: <span class="v" id="ucount">—</span></span>
+    </div>
+    <div class="stat">
+      <span>seen this session: <span class="v" id="seen">0</span></span>
+      <span>matches: <span class="v" id="matches">0</span></span>
+      <span>misses: <span class="v" id="misses">0</span></span>
+      <span>est. rare odds: <span class="v" id="odds">—</span></span>
+    </div>
+
+    <h2 style="margin-top: 14px">last 12 mints</h2>
+    <div id="recent"></div>
+
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0x44b28991b167582f18ba0259e0173176ca125505";
+const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
+
+// selectors
+const SEL = {
+  OwnerUpegsCount: "0x067b2601",
+  OwnerUpegsPage:  "0x407d4fb4",
+  generate:        "0x4a7dd523"
+};
+
+// ---- ABI helpers ----
+function pad32(h){return h.replace(/^0x/,"").toLowerCase().padStart(64,"0");}
+function uintHex(n){return pad32(BigInt(n).toString(16));}
+function addrHex(a){return pad32(a.replace(/^0x/,"").toLowerCase());}
+function callOwnerUpegsCount(a){return SEL.OwnerUpegsCount + addrHex(a);}
+function callOwnerUpegsPage(a,p,s){return SEL.OwnerUpegsPage + addrHex(a) + uintHex(p) + uintHex(s);}
+function callGenerate(seed){return SEL.generate + pad32(BigInt(seed).toString(16));}
+
+let rpcId = 0;
+async function rpc(method, params){
+  const r = await fetch(RPC,{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:++rpcId,method,params})});
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+async function call(to,data){return rpc("eth_call",[{to,data},"latest"]);}
+
+function decodeUint(hex){return BigInt(hex);}
+function decodeOwnerUpegsPage(hex){
+  const data = hex.replace(/^0x/,"");
+  if (data.length < 128) return [];
+  const len = parseInt(data.slice(64,128), 16);
+  const out = [];
+  for (let i = 0; i < len; i++){
+    const base = 128 + i*128;
+    out.push({
+      id: Number(BigInt("0x" + data.slice(base, base+64))),
+      seed: BigInt("0x" + data.slice(base+64, base+128)).toString()
+    });
+  }
+  return out;
+}
+function decodeString(hex){
+  const data = hex.replace(/^0x/,"");
+  const len = parseInt(data.slice(64,128), 16);
+  const utf8 = data.slice(128, 128+len*2);
+  let s = "";
+  for (let i = 0; i < utf8.length; i += 2) s += String.fromCharCode(parseInt(utf8.slice(i,i+2),16));
+  return s;
+}
+
+// decode a uint256 seed into named traits — mirrors UpegMetadata.sol
+function decodeTraits(seedStr){
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background: b(0),
+    horn:        b(1),
+    accessories: b(2),
+    hair:        b(3),
+    wings:       b(4),
+    tail:        b(5),
+    legsFront:   b(6),
+    legsBack:    b(7),
+    eyes:        b(8),
+    body:        b(9),
+    ground:      b(10),
+    bodyColor:        b(11),
+    eyesColor:        b(12),
+    hairColor:        b(13),
+    hornColor:        b(14),
+    groundColor:      b(15),
+    accessoriesColor: b(16),
+    tailColor:        b(17),
+  };
+}
+function optionalCount(t){
+  return (t.horn?1:0)+(t.accessories?1:0)+(t.hair?1:0)+(t.wings?1:0)+(t.tail?1:0)+(t.ground?1:0);
+}
+
+function getCriteria(){
+  return {
+    wings:  document.getElementById("reqWings").checked,
+    horn:   document.getElementById("reqHorn").checked,
+    hair:   document.getElementById("reqHair").checked,
+    ground: document.getElementById("reqGround").checked,
+    tail:   document.getElementById("reqTail").checked,
+    acc:    document.getElementById("reqAcc").checked,
+    maxOpt: parseInt(document.getElementById("maxOpt").value || "6", 10),
+    bgVal:  document.getElementById("bgVal").value === "" ? null : parseInt(document.getElementById("bgVal").value, 10)
+  };
+}
+function matches(t, c){
+  if (c.wings  && !t.wings) return false;
+  if (c.horn   && !t.horn) return false;
+  if (c.hair   && !t.hair) return false;
+  if (c.ground && !t.ground) return false;
+  if (c.tail   && !t.tail) return false;
+  if (c.acc    && !t.accessories) return false;
+  if (c.bgVal !== null && t.background !== c.bgVal) return false;
+  if (optionalCount(t) > c.maxOpt) return false;
+  return true;
+}
+
+// ---- wallet (uses the picker pattern from /upeg) ----
+const announcedWallets = [];
+window.addEventListener("eip6963:announceProvider", e => announcedWallets.push(e.detail));
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+let wallet = null, account = null;
+async function connectWallet(){
+  const candidates = [];
+  for (const w of announcedWallets) candidates.push({provider: w.provider, name: w.info?.name || "Wallet"});
+  if (Array.isArray(window.ethereum?.providers)) {
+    for (const p of window.ethereum.providers) candidates.push({provider: p, name: providerName(p)});
+  } else if (window.ethereum) {
+    candidates.push({provider: window.ethereum, name: providerName(window.ethereum)});
+  }
+  if (window.phantom?.ethereum) candidates.push({provider: window.phantom.ethereum, name: "Phantom (direct)"});
+  const seen = new Set(); const uniq = [];
+  for (const c of candidates) if (!seen.has(c.provider)) { seen.add(c.provider); uniq.push(c); }
+  uniq.sort((a,b) => (a.provider.isPhantom?1:0) - (b.provider.isPhantom?1:0));
+  for (const c of uniq) {
+    try {
+      const accs = await c.provider.request({method:"eth_requestAccounts"});
+      if (accs?.length) { wallet = c.provider; account = accs[0]; return c.name; }
+    } catch (e) { console.warn("[grind]", c.name, "refused:", e.message); }
+  }
+  throw new Error("no wallet connected");
+}
+function providerName(p){
+  if (p.isMetaMask) return "MetaMask";
+  if (p.isRabby) return "Rabby";
+  if (p.isRainbow) return "Rainbow";
+  if (p.isCoinbaseWallet) return "Coinbase";
+  if (p.isPhantom) return "Phantom";
+  return "Wallet";
+}
+
+// ---- monitor loop ----
+let watching = false;
+let knownIds = new Set();
+let stats = { seen: 0, matches: 0, misses: 0 };
+const recentList = [];
+
+const $log = document.getElementById("log");
+function log(msg, klass) {
+  const t = new Date().toTimeString().slice(0,8);
+  $log.insertAdjacentHTML("afterbegin", `<div class="${klass||'info'}">[${t}] ${msg}</div>`);
+}
+
+const $recent = document.getElementById("recent");
+function pushRecent(item, isMatch) {
+  recentList.unshift({ ...item, isMatch });
+  while (recentList.length > 12) recentList.pop();
+  $recent.innerHTML = recentList.map(r =>
+    `<div class="card${r.isMatch?' match':''}" title="#${r.id} · ${r.isMatch?'MATCH':'miss'}">${r.svg||''}<span class="tag">#${r.id}</span></div>`
+  ).join("");
+}
+
+async function snapshotAndDecorate(){
+  if (!account) return;
+  // get current count
+  const countHex = await call(TOKEN, callOwnerUpegsCount(account));
+  const count = Number(decodeUint(countHex));
+  document.getElementById("ucount").textContent = count;
+
+  // get current page (last 100)
+  const start = Math.max(0, count - 100);
+  const pageNum = Math.floor(start / 100);
+  const pageRaw = await call(TOKEN, callOwnerUpegsPage(account, pageNum, 100));
+  const page = decodeOwnerUpegsPage(pageRaw);
+  return page;
+}
+
+async function watchTick(){
+  try {
+    const page = await snapshotAndDecorate();
+    if (!page) return;
+    const c = getCriteria();
+    for (const u of page) {
+      if (knownIds.has(u.id)) continue;
+      knownIds.add(u.id);
+      // fetch SVG
+      let svg = "";
+      try { svg = decodeString(await call(HOOK, callGenerate(u.seed))); }
+      catch { /* skip svg */ }
+      const t = decodeTraits(u.seed);
+      const isMatch = matches(t, c);
+      stats.seen++;
+      if (isMatch) stats.matches++; else stats.misses++;
+      const traitsList = Object.entries(t).filter(([k,v]) => v > 0 && !k.endsWith("Color")).map(([k]) => k).join(",");
+      log(`uPEG #${u.id} <span class="${isMatch?'ok':'miss'}">${isMatch?'✓ MATCH':'miss'}</span> · ${optionalCount(t)} opt traits · ${traitsList}`, isMatch?"ok":"miss");
+      pushRecent({id: u.id, seed: u.seed, svg}, isMatch);
+    }
+    // stats UI
+    document.getElementById("seen").textContent = stats.seen;
+    document.getElementById("matches").textContent = stats.matches;
+    document.getElementById("misses").textContent = stats.misses;
+    document.getElementById("odds").textContent = stats.seen > 0 ? `1 in ~${Math.round(stats.seen / Math.max(1, stats.matches))}` : "—";
+  } catch (e) {
+    log(`tick error: ${e.message}`, "miss");
+  }
+}
+
+let watchInterval = null;
+document.getElementById("watchToggle").onclick = async () => {
+  if (!account) { log("connect wallet first", "miss"); return; }
+  watching = !watching;
+  document.getElementById("watchToggle").textContent = watching ? "stop watching" : "start watching";
+  if (watching) {
+    knownIds = new Set();
+    // seed knownIds with current wallet contents so we only flag NEW mints
+    const current = await snapshotAndDecorate();
+    if (current) for (const u of current) knownIds.add(u.id);
+    log(`watching ${account.slice(0,6)}…${account.slice(-4)} for new mints (poll every 6s)`, "ok");
+    watchInterval = setInterval(watchTick, 6000);
+  } else {
+    if (watchInterval) clearInterval(watchInterval);
+    log("stopped watching", "info");
+  }
+};
+
+document.getElementById("connect").onclick = async () => {
+  try {
+    const name = await connectWallet();
+    document.getElementById("addr").textContent = `${account.slice(0,6)}…${account.slice(-4)} (${name})`;
+    document.getElementById("watchToggle").disabled = false;
+    document.getElementById("connect").textContent = "✓ connected";
+    // balance
+    const balHex = await rpc("eth_getBalance", [account, "latest"]);
+    const bal = Number(BigInt(balHex)) / 1e18;
+    document.getElementById("bal").textContent = bal.toFixed(4) + " ETH";
+    // initial snapshot
+    await snapshotAndDecorate();
+    log(`connected via ${name}`, "ok");
+  } catch (e) {
+    log("connect failed: " + e.message, "miss");
+  }
+};
+</script>
+</body>
+</html>
