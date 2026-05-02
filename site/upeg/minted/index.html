@@ -60,6 +60,7 @@
 <div class="toolbar">
   <input id="cidInput" placeholder="collection_id (0x...)" autocomplete="off" spellcheck="false">
   <button id="cidGo">load</button>
+  <button id="cidClear" title="forget cache and rescan from genesis">rescan</button>
   <span id="counts" style="color:#8a8f99"></span>
 </div>
 
@@ -176,66 +177,108 @@ function renderItem(item) {
   $grid.appendChild(card);
 }
 
+function cacheKey(collectionId) { return "upeg-coll-" + collectionId.toLowerCase(); }
+function loadCache(collectionId) {
+  try { return JSON.parse(localStorage.getItem(cacheKey(collectionId)) || "null"); }
+  catch { return null; }
+}
+function saveCache(collectionId, lastBlock, itemList) {
+  try { localStorage.setItem(cacheKey(collectionId), JSON.stringify({ lastBlock, items: itemList })); }
+  catch (e) { console.warn("cache save failed:", e); }
+}
+
 async function scanCollection(collectionId) {
   $grid.innerHTML = "";
   items.length = 0;
-  $status.textContent = `scanning chain for events targeting collection ${collectionId.slice(0,12)}…`;
   $counts.textContent = "";
 
-  // Get current block
+  // 1. Render cached items immediately (instant on repeat visits)
+  const cache = loadCache(collectionId);
+  let startBlock = SCAN_FROM_BLOCK;
+  if (cache?.items?.length) {
+    $status.textContent = `loaded ${cache.items.length} from cache · scanning new blocks…`;
+    for (const it of cache.items) {
+      items.push(it);
+      renderItem(it);
+    }
+    if (cache.lastBlock) startBlock = cache.lastBlock + 1;
+    $counts.textContent = `${items.length} items in collection`;
+  } else {
+    $status.textContent = `scanning chain for events targeting collection ${collectionId.slice(0,12)}…`;
+  }
+
+  // 2. Scan the rest in parallel chunks
   const latestHex = await rpc("eth_blockNumber");
   const latest = parseInt(latestHex, 16);
+  if (latest < startBlock) {
+    $status.textContent = `✓ up to date · ${items.length} items in collection`;
+    return;
+  }
 
-  // Scan in 10-block chunks (free Alchemy tier limit)
+  const CHUNK = 10;        // Alchemy free tier max range per getLogs
+  const PARALLEL = 8;      // 8 concurrent requests = ~80 blocks/sec at network limit
+
+  // Build list of (from, to) chunks
+  const chunks = [];
+  for (let f = startBlock; f <= latest; f += CHUNK) {
+    chunks.push([f, Math.min(f + CHUNK - 1, latest)]);
+  }
+  const totalBlocks = latest - startBlock + 1;
   let scanned = 0;
-  const totalBlocks = latest - SCAN_FROM_BLOCK + 1;
-  let logsTotal = 0;
+  let logsTotal = items.length;
+  let lastSavedBlock = startBlock - 1;
 
-  for (let from = SCAN_FROM_BLOCK; from <= latest; from += 10) {
-    const to = Math.min(from + 9, latest);
-    let logs;
-    try {
-      logs = await rpc("eth_getLogs", [{
-        // No address filter — any contract that emits the ESIP-3 event into
-        // our collection counts. Filter happens on collection_id below.
-        fromBlock: "0x" + from.toString(16),
-        toBlock:   "0x" + to.toString(16),
-        topics: [EVENT_TOPIC]
-      }]);
-    } catch (e) {
-      console.warn("getLogs failed for", from, "-", to, ":", e.message);
-      continue;
-    }
-
-    for (const log of logs) {
+  // Worker pool
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, chunks.length) }, async () => {
+    while (true) {
+      const k = next++;
+      if (k >= chunks.length) return;
+      const [from, to] = chunks[k];
+      let logs;
       try {
-        const owner = "0x" + log.topics[1].slice(26);
-        const uri = decodeStringFromLogData(log.data);
-        const parsed = parseDataURI(uri);
-        if (!parsed.json) continue;
-        // filter to this collection
-        if (parsed.json.collection_id?.toLowerCase() !== collectionId.toLowerCase()) continue;
-        const upegId = parsed.json.item?.item_index;
-        if (!upegId) continue;
-        const item = {
-          upegId,
-          owner,
-          txHash: log.transactionHash,
-          blockNumber: parseInt(log.blockNumber, 16),
-          json: parsed.json,
-          svg: parsed.svg
-        };
-        items.push(item);
-        renderItem(item);
-        logsTotal++;
+        logs = await rpc("eth_getLogs", [{
+          fromBlock: "0x" + from.toString(16),
+          toBlock:   "0x" + to.toString(16),
+          topics: [EVENT_TOPIC]
+        }]);
       } catch (e) {
-        console.warn("decode failed:", e);
+        console.warn("getLogs failed for", from, "-", to, ":", e.message);
+        scanned += (to - from + 1);
+        continue;
+      }
+      for (const log of logs) {
+        try {
+          const owner = "0x" + log.topics[1].slice(26);
+          const uri = decodeStringFromLogData(log.data);
+          const parsed = parseDataURI(uri);
+          if (!parsed.json) continue;
+          if (parsed.json.collection_id?.toLowerCase() !== collectionId.toLowerCase()) continue;
+          const upegId = parsed.json.item?.item_index;
+          if (!upegId) continue;
+          if (items.find(i => i.upegId === upegId)) continue; // dedup vs cache
+          const item = {
+            upegId, owner,
+            txHash: log.transactionHash,
+            blockNumber: parseInt(log.blockNumber, 16),
+            json: parsed.json,
+            svg: parsed.svg
+          };
+          items.push(item);
+          renderItem(item);
+          logsTotal++;
+        } catch (e) { console.warn("decode failed:", e); }
+      }
+      scanned += (to - from + 1);
+      $status.textContent = `scanned ${scanned.toLocaleString()} / ${totalBlocks.toLocaleString()} new blocks · ${logsTotal} items total`;
+      $counts.textContent = `${items.length} items in collection`;
+      // Save progress periodically
+      if (to - lastSavedBlock > 500) {
+        lastSavedBlock = to;
+        saveCache(collectionId, to, items);
       }
     }
-    scanned = to - SCAN_FROM_BLOCK + 1;
-    $status.textContent = `scanned ${scanned.toLocaleString()} / ${totalBlocks.toLocaleString()} blocks · ${logsTotal} mints found`;
-    $counts.textContent = `${items.length} items in collection`;
-  }
+  }));
 
   // Genesis is a separate L1 calldata tx, not via our contract — add it manually
   // if collection_id is the default uPEG one and we know its details.
@@ -270,6 +313,9 @@ async function scanCollection(collectionId) {
     }
   }
 
+  // Final cache update (includes genesis fetched above)
+  saveCache(collectionId, latest, items);
+
   if (items.length === 0) {
     $status.textContent = `scan complete · 0 items found in this collection (yet)`;
     $grid.innerHTML = `<div class="empty">no mints yet for this collection</div>`;
@@ -289,6 +335,11 @@ $cidGo.onclick = () => {
   scanCollection(cid);
 };
 $cid.addEventListener("keydown", e => { if (e.key === "Enter") $cidGo.click(); });
+document.getElementById("cidClear").onclick = () => {
+  const cid = $cid.value.trim();
+  try { localStorage.removeItem(cacheKey(cid)); } catch {}
+  scanCollection(cid).catch(e => { $status.textContent = "error: " + e.message; });
+};
 
 scanCollection(urlCid).catch(e => { $status.textContent = "error: " + e.message; });
 </script>
