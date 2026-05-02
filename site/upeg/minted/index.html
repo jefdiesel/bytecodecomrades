@@ -79,9 +79,12 @@
 "use strict";
 
 const RPC = "/api/rpc?chain=eth-mainnet";
-const ETHSCRIBER = "0x1afc28694055efe4e1d5b4b0b042fb0f81d80edd";
-const SCAN_FROM_BLOCK = 25004636;
+// Genesis block of the collection (the L1 tx hash that created it).
+// Anything in this collection had to be ethscribed at or after this block.
+const SCAN_FROM_BLOCK = 25004486;
 // keccak256("ethscriptions_protocol_CreateEthscription(address,string)")
+// Scan events by TOPIC ONLY (no address filter) so we catch every
+// contract that ethscribes into this collection, not just one.
 const EVENT_TOPIC = "0x665fba0baf3dc33e9943340197893ac16f56482c2defb8de60f944987fee451c";
 const DEFAULT_COLLECTION_ID = "0x13d703858b162a144ec5d38b05726d39893a607a5bd070c84e795f208ebdfcab";
 
@@ -193,7 +196,8 @@ async function scanCollection(collectionId) {
     let logs;
     try {
       logs = await rpc("eth_getLogs", [{
-        address: ETHSCRIBER,
+        // No address filter — any contract that emits the ESIP-3 event into
+        // our collection counts. Filter happens on collection_id below.
         fromBlock: "0x" + from.toString(16),
         toBlock:   "0x" + to.toString(16),
         topics: [EVENT_TOPIC]
