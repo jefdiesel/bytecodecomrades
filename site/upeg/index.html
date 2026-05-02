@@ -573,11 +573,10 @@ $wClear.onclick = exitWallet;
 //   1) ETHSCRIBER_CONTRACT == null → EOA self-tx, calldata = hex(dataURI), zero fee
 //   2) ETHSCRIBER_CONTRACT set     → call mint(string) on the contract with msg.value=mintFee
 //                                    contract emits ESIP-3 event, forwards fee, refunds excess
-// Genesis 1 (0xa5fca28f...) was rejected by the AppChain parser due to a
-// merkle_root that was 63 hex chars instead of 64 — possibly stale-cache, possibly
-// a one-off encoding glitch. Resetting to null so the next click does a fresh
-// genesis that we then verify byte-exact before re-pinning.
-const COLLECTION_ID = null;
+// Genesis 2 — sent server-side via cast after the first one (0xa5fca28f...) was
+// rejected by the AppChain parser for a 63-char merkle_root. This one is
+// verified byte-exact on chain: 64-char merkle_root, regex matches, item #19125.
+const COLLECTION_ID = "0x7d2154a90ce8def4fa18f66d1095ae2b147faf17705eb2a90caf50579589a5a7";
 const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
 const ETHSCRIBER_CONTRACT = "0xA95Da3A380DB95F123C6B674F701B780C3166892"; // mainnet, linear curve
 // Selectors for UpegEthscriber
