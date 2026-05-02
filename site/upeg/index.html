@@ -578,7 +578,7 @@ $wClear.onclick = exitWallet;
 // verified byte-exact on chain: 64-char merkle_root, regex matches, item #19125.
 const COLLECTION_ID = "0x7d2154a90ce8def4fa18f66d1095ae2b147faf17705eb2a90caf50579589a5a7";
 const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
-const ETHSCRIBER_CONTRACT = "0xA95Da3A380DB95F123C6B674F701B780C3166892"; // mainnet, linear curve
+const ETHSCRIBER_CONTRACT = "0xdede89870d45bf04e947af1e6d2a424864cc372b"; // gentle curve: 0.0005 base + 0.00001/mint
 // Selectors for UpegEthscriber
 const ETHSCRIBER_SEL = {
   currentPrice: "0x9d1b464a",   // currentPrice()
@@ -731,7 +731,11 @@ async function mintEthscription() {
         from,
         to: ETHSCRIBER_CONTRACT,
         value: "0x" + price.toString(16),
-        data: encodeMintStringCalldata(dataURI)
+        data: encodeMintStringCalldata(dataURI),
+        // pre-set gas so MetaMask doesn't run its own eth_estimateGas (it's been
+        // returning -32603 on this on some setups even though the actual call
+        // estimates fine via the underlying RPC). 250k is ~25% above measured.
+        gas: "0x3d090"  // 250000
       };
     } else {
       // EOA path: zero-value self-tx, calldata = hex(dataURI). Used for genesis
