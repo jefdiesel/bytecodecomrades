@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG — seed predictor</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 11px; margin: 0 0 10px; color: #888; font-weight: 600;
+              text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
+  .row label { color: #888; min-width: 130px; }
+  .row .v { color: #fff; word-break: break-all; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277;
+           padding: 6px 14px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  .preview { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
+  .preview .art { width: 200px; aspect-ratio: 1; image-rendering: pixelated;
+                  background: #0b0c10; border-radius: 4px; }
+  .preview .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; font-size: 11px; }
+  .traits .t { background: #0b0c10; padding: 4px 6px; border-radius: 3px; display: flex; justify-content: space-between; }
+  .traits .t .k { color: #888; }
+  .traits .t .v { color: #fff; font-weight: 600; }
+  .traits .t.zero { opacity: .35; }
+  .badge { display: inline-block; background: #2a3548; color: #ccf; padding: 2px 8px; border-radius: 2px; font-size: 10px; }
+  .badge.rare { background: #4a3548; color: #fcf; }
+  .badge.legendary { background: #4a4a35; color: #ffc; }
+  .seed-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+  .scell { background: #16181d; border-radius: 3px; overflow: hidden; }
+  .scell .art { aspect-ratio: 1; background: #0b0c10; image-rendering: pixelated; }
+  .scell .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .scell .meta { padding: 4px 6px; font-size: 10px; line-height: 1.4; color: #888; }
+  .scell.rare .art { box-shadow: inset 0 0 0 2px #f6c; }
+  .scell.legendary .art { box-shadow: inset 0 0 0 2px #fc6; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG — seed predictor (read-only)</h1>
+  <div class="sub">
+    No wallet, no swap, no gas. Reads the hook's <code>_randomSeed</code> + <code>_randomCount</code> + chain state, simulates the keccak forward, decodes traits.
+    <br><b>Caveat:</b> the seed for YOUR mint depends on the prevrandao of the block your tx mines in. Public users can't predict that. This shows what you'd get if your tx landed in the current block right now.
+    <br>← <a href="/upeg">gallery</a> · <a href="/upeg/grind">grinder</a> · <a href="/upeg/minted">collection</a>
+  </div>
+</header>
+
+<div class="panel">
+  <h2>chain state</h2>
+  <div class="row"><label>current block</label><span class="v" id="block">—</span></div>
+  <div class="row"><label>block.timestamp</label><span class="v" id="ts">—</span></div>
+  <div class="row"><label>block.prevrandao</label><span class="v" id="pr">—</span></div>
+  <div class="row"><label>hook randomSeed()</label><span class="v" id="seed">—</span></div>
+  <div class="row"><label>hook randomCount</label><span class="v" id="count">—</span></div>
+  <div class="row" style="padding-top: 10px"><button id="refresh">refresh</button></div>
+</div>
+
+<div class="panel">
+  <h2>predicted next mint (one swap from now)</h2>
+  <div class="preview">
+    <div class="art" id="nextArt"></div>
+    <div>
+      <div class="row"><label>predicted seed</label><span class="v" id="nextSeed">—</span></div>
+      <div class="row"><label>rarity</label><span class="v" id="rarity">—</span></div>
+      <div class="traits" id="nextTraits"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>next 24 swaps if all in current block (count+1 .. count+24)</h2>
+  <div class="sub" style="margin-bottom: 10px">
+    Speculative — assumes prevrandao + timestamp + block number stay constant.
+    Useful only for tightly-bunched bundle simulation. Pink outline = rare,
+    yellow = legendary.
+  </div>
+  <div class="seed-list" id="future"></div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
+const SEL = {
+  randomSeed: "0xc81e0a1d",   // randomSeed()
+  generate:   "0x4a7dd523"    // generate(uint256)
+};
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const r = await fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+
+function pad32(h){ return h.replace(/^0x/,"").toLowerCase().padStart(64,"0"); }
+function callGenerate(seed){ return SEL.generate + pad32(BigInt(seed).toString(16)); }
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  let s = "";
+  for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
+  return s;
+}
+function decodeTraits(seedStr){
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background: b(0),
+    horn: b(1), accessories: b(2), hair: b(3), wings: b(4), tail: b(5),
+    legsFront: b(6), legsBack: b(7), eyes: b(8), body: b(9), ground: b(10),
+    bodyColor: b(11), eyesColor: b(12), hairColor: b(13),
+    hornColor: b(14), groundColor: b(15), accessoriesColor: b(16), tailColor: b(17),
+  };
+}
+function optionalCount(t) {
+  return (t.horn?1:0)+(t.accessories?1:0)+(t.hair?1:0)+(t.wings?1:0)+(t.tail?1:0)+(t.ground?1:0);
+}
+
+// keccak via @noble/hashes — known good loader
+let _k = null;
+async function keccak() {
+  if (_k) return _k;
+  const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+  _k = noble.keccak_256;
+  return _k;
+}
+
+function hexToBytes(h) {
+  h = h.replace(/^0x/, "");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i*2, i*2+2), 16);
+  return out;
+}
+function bytesToHex(b) {
+  return Array.from(b).map(x => x.toString(16).padStart(2,"0")).join("");
+}
+
+// Hook computes nextSeed = keccak(abi.encodePacked(++count, prevSeed, ts, prevrandao, blockNum))
+// abi.encodePacked of uint256s = each value as 32 raw bytes concatenated
+async function nextSeed(prevSeed, prevCount, ts, pr, bn) {
+  const k = await keccak();
+  const newCount = (BigInt(prevCount) + 1n).toString();
+  const vals = [newCount, prevSeed, ts.toString(), BigInt(pr).toString(), bn.toString()];
+  const packed = new Uint8Array(32 * 5);
+  for (let i = 0; i < 5; i++) {
+    const h = BigInt(vals[i]).toString(16).padStart(64, "0");
+    packed.set(hexToBytes(h), i * 32);
+  }
+  return BigInt("0x" + bytesToHex(k(packed))).toString();
+}
+
+// Find _randomCount slot by scanning hook storage for the slot whose value
+// matches randomSeed(). _randomCount is at slot+1 per the source declaration order.
+async function findRandomCount(currentSeed) {
+  const target = BigInt(currentSeed);
+  for (let slot = 0; slot < 16; slot++) {
+    const slotHex = "0x" + slot.toString(16).padStart(64, "0");
+    let v;
+    try { v = await rpc("eth_getStorageAt", [HOOK, slotHex, "latest"]); }
+    catch { continue; }
+    if (v && BigInt(v) === target) {
+      const next = "0x" + (slot+1).toString(16).padStart(64, "0");
+      const cv = await rpc("eth_getStorageAt", [HOOK, next, "latest"]);
+      return { count: BigInt(cv).toString(), seedSlot: slot };
+    }
+  }
+  return null;
+}
+
+async function fetchSvg(seed) {
+  try { return decodeString(await rpc("eth_call", [{ to: HOOK, data: callGenerate(seed) }, "latest"])); }
+  catch { return ""; }
+}
+
+const $ = id => document.getElementById(id);
+
+function rarityLabel(t) {
+  const oc = optionalCount(t);
+  if (oc === 0) return { label: "MONOLITH (0 optionals)", cls: "legendary" };
+  if (oc === 1) return { label: "ULTRA (1 optional)", cls: "legendary" };
+  if (oc <= 2) return { label: "RARE (" + oc + " optionals)", cls: "rare" };
+  return { label: "common (" + oc + " optionals)", cls: "" };
+}
+
+function renderTraits(t, container) {
+  const fields = [
+    ["background", t.background], ["body", t.body], ["body_color", t.bodyColor],
+    ["eyes", t.eyes], ["eyes_color", t.eyesColor],
+    ["legs_front", t.legsFront], ["legs_back", t.legsBack],
+    ["horn", t.horn], ["horn_color", t.hornColor],
+    ["accessories", t.accessories], ["accessories_color", t.accessoriesColor],
+    ["hair", t.hair], ["hair_color", t.hairColor],
+    ["wings", t.wings],
+    ["tail", t.tail], ["tail_color", t.tailColor],
+    ["ground", t.ground], ["ground_color", t.groundColor],
+  ];
+  container.innerHTML = fields.map(([k, v]) =>
+    `<div class="t${v === 0 ? ' zero' : ''}"><span class="k">${k}</span><span class="v">${v}</span></div>`
+  ).join("");
+}
+
+async function refresh() {
+  $("block").textContent = "loading...";
+  try {
+    const blk = await rpc("eth_getBlockByNumber", ["latest", false]);
+    const bn = parseInt(blk.number, 16);
+    const ts = parseInt(blk.timestamp, 16);
+    const pr = blk.mixHash || blk.prevRandao || "0x0";
+    $("block").textContent = bn.toLocaleString();
+    $("ts").textContent = ts + " (" + new Date(ts*1000).toLocaleString() + ")";
+    $("pr").textContent = pr;
+
+    const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
+    const currentSeed = BigInt(seedHex).toString();
+    $("seed").textContent = currentSeed;
+
+    const cd = await findRandomCount(currentSeed);
+    const count = cd ? cd.count : "0";
+    $("count").textContent = cd ? `${count} (slot ${cd.seedSlot+1})` : "couldn't find slot — using 0";
+
+    const next = await nextSeed(currentSeed, count, ts, pr, bn);
+    $("nextSeed").textContent = next;
+    const t = decodeTraits(next);
+    const rar = rarityLabel(t);
+    $("rarity").innerHTML = `<span class="badge ${rar.cls}">${rar.label}</span>`;
+    renderTraits(t, $("nextTraits"));
+    $("nextArt").innerHTML = await fetchSvg(next);
+
+    $("future").innerHTML = "loading 24 candidates...";
+    const cells = [];
+    let s = currentSeed, c = BigInt(count);
+    for (let i = 1; i <= 24; i++) {
+      s = await nextSeed(s, c.toString(), ts, pr, bn);
+      c += 1n;
+      cells.push({ seed: s, idx: i });
+    }
+    await Promise.all(cells.map(async cell => {
+      cell.svg = await fetchSvg(cell.seed);
+      cell.t = decodeTraits(cell.seed);
+    }));
+    $("future").innerHTML = cells.map(cell => {
+      const oc = optionalCount(cell.t);
+      let cls = "";
+      if (oc <= 1) cls = "legendary";
+      else if (oc <= 2) cls = "rare";
+      return `<div class="scell ${cls}" title="seed ${cell.seed}">
+        <div class="art">${cell.svg}</div>
+        <div class="meta">+${cell.idx} · ${oc} opt</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    $("block").textContent = "error: " + e.message;
+    console.error(e);
+  }
+}
+
+$("refresh").onclick = refresh;
+refresh();
+</script>
+</body>
+</html>
