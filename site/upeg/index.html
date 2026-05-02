@@ -870,8 +870,9 @@ async function mintEthscription() {
       console.log("UPEG_COLLECTION_GENESIS_TXHASH=" + txHash);
     } else {
       $st.innerHTML =
-        `tx sent → <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">etherscan</a><br>` +
-        `once mined: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/${txHash.slice(0,10)}…</a>`;
+        `<b>⏳ pending</b> · tx <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">${txHash.slice(0,10)}…</a> — waiting for confirmation…`;
+      // Poll for receipt every 3s
+      pollReceipt(txHash, r).catch(e => console.warn("[upeg-mint] poll error:", e));
     }
   } catch (e) {
     console.error("[upeg-mint] error:", e);
@@ -882,6 +883,39 @@ async function mintEthscription() {
     $btn.disabled = false;
   }
 }
+async function pollReceipt(txHash, record) {
+  const $st = document.getElementById("mintStatus");
+  const start = Date.now();
+  for (let i = 0; i < 100; i++) {  // ~5min max
+    await new Promise(r => setTimeout(r, 3000));
+    let receipt;
+    try {
+      const res = await fetch(RPC, {
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method:"eth_getTransactionReceipt", params:[txHash] })
+      });
+      receipt = (await res.json()).result;
+    } catch { continue; }
+    if (!receipt) {
+      const elapsed = Math.round((Date.now() - start) / 1000);
+      $st.innerHTML = `<b>⏳ pending</b> · tx <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">${txHash.slice(0,10)}…</a> — waiting ${elapsed}s for confirmation…`;
+      continue;
+    }
+    if (receipt.status === "0x1") {
+      $st.innerHTML =
+        `<b>✓ minted</b> uPEG #${record.id} as ethscription<br>` +
+        `tx <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">${txHash.slice(0,10)}…</a> · ` +
+        `<a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">view on ethscriptions.com</a><br>` +
+        `<span style="opacity:.6">block ${parseInt(receipt.blockNumber, 16)} · gas used ${parseInt(receipt.gasUsed, 16).toLocaleString()}</span>`;
+    } else {
+      $st.innerHTML = `<b>✗ tx reverted</b> — <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">debug on etherscan</a>`;
+    }
+    return;
+  }
+  $st.innerHTML += `<br><span style="opacity:.6">stopped polling after 5min — check etherscan/ethscriptions manually</span>`;
+}
+
 document.getElementById("mintBtn").onclick = mintEthscription;
 document.getElementById("resetWallet").onclick = () => {
   _chosenWallet = null;
