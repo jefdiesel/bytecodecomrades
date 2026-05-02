@@ -741,12 +741,14 @@ async function mintEthscription() {
       // the no-contract fallback.
       const data = "0x" + strToHex(dataURI);
       const kb = (data.length / 2 / 1024).toFixed(1);
-      txParams = { from, to: from, value: "0x0", data };
+      // Note: omit `value` field entirely (some wallets choke on "0x0"). Default = 0.
+      txParams = { from, to: from, data };
       $st.textContent = isGenesis
         ? `signing GENESIS tx (creates the uPEG Unicorns collection + inscribes #${r.id} as item 1) — ${kb} KB calldata`
         : `signing tx (mints uPEG #${r.id} into the collection, no fee) — ${kb} KB calldata`;
     }
 
+    console.log("[upeg-mint] sending tx", txParams);
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
       params: [txParams]
@@ -765,7 +767,10 @@ async function mintEthscription() {
         `once mined: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/${txHash.slice(0,10)}…</a>`;
     }
   } catch (e) {
-    $st.textContent = "mint failed: " + (e.message || String(e));
+    console.error("[upeg-mint] error:", e);
+    const detail = e?.data?.message || e?.cause?.message || e?.message || String(e);
+    const code = e?.code != null ? ` (code ${e.code})` : "";
+    $st.textContent = `mint failed: ${detail}${code}`;
   } finally {
     $btn.disabled = false;
   }
