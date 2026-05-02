@@ -200,9 +200,19 @@ function openDB() {
   return new Promise((res, rej) => {
     const r = indexedDB.open(DB_NAME, 1);
     r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: "id" });
-    r.onsuccess = () => res(r.result);
+    r.onsuccess = () => {
+      // If the connection drops (browser closes it on inactivity, or another
+      // tab triggers a versionchange), null our reference so the next op reopens.
+      r.result.onclose = () => { db = null; };
+      r.result.onversionchange = () => { try { r.result.close(); } catch {} db = null; };
+      res(r.result);
+    };
     r.onerror = () => rej(r.error);
   });
+}
+async function ensureDB() {
+  if (!db) db = await openDB();
+  return db;
 }
 function dbGetAll(db) { return new Promise((res, rej) => {
   const tx = db.transaction(STORE, "readonly");
@@ -338,7 +348,7 @@ async function init() {
   try { db = await openDB(); }
   catch (e) { $status.textContent = "IndexedDB unavailable: " + e.message; return; }
 
-  const cached = await dbGetAll(db);
+  const cached = await dbGetAll(await ensureDB());
   cached.sort((a, b) => a.id - b.id);
   $status.textContent = `loading ${cached.length.toLocaleString()} from local archive…`;
   // Render cached items as "alive" (unverified). Live scan will confirm or
@@ -426,7 +436,7 @@ async function loadMore() {
         renderCell(record);
         if (!ex || ex.record.status !== "alive" || ex.record.holder !== p.holder) toCache.push(record);
       }
-      if (toCache.length) await dbBulkPut(db, toCache);
+      if (toCache.length) await dbBulkPut(await ensureDB(), toCache);
 
       totalRendered += pairs.length;
       refreshCounts();
@@ -447,7 +457,7 @@ async function loadMore() {
         burnedNow.push({ ...record, status: "burned" });
       }
     }
-    if (burnedNow.length) await dbBulkPut(db, burnedNow);
+    if (burnedNow.length) await dbBulkPut(await ensureDB(), burnedNow);
     for (const { div, record } of cellsById.values())
       div.classList.toggle("burned", record.status === "burned");
     refreshCounts();
@@ -543,7 +553,7 @@ $fAlive.onclick = () => setFilter("alive");
 $fBurned.onclick = () => setFilter("burned");
 
 $export.onclick = async () => {
-  const all = await dbGetAll(db);
+  const all = await dbGetAll(await ensureDB());
   const blob = new Blob([JSON.stringify(all, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -555,7 +565,7 @@ $export.onclick = async () => {
 
 $clear.onclick = async () => {
   if (!confirm("delete all cached unicorns from this browser?")) return;
-  await dbClear(db);
+  await dbClear(await ensureDB());
   for (const { div } of cellsById.values()) div.remove();
   cellsById.clear();
   liveAlive.clear();
@@ -583,13 +593,25 @@ async function findById(idStr) {
 
   // _upegs is mapping(uint256 => uint256) at slot 0 of UpegToken.
   // storage key = keccak256(abi.encode(id, 0))
-  const { keccak_256 } = await import("https://esm.sh/js-sha3@0.9.3");
+  $st.textContent = `loading keccak lib…`;
+  let keccak_256;
+  try {
+    const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+    keccak_256 = noble.keccak_256;
+    if (!keccak_256) throw new Error("keccak_256 not exported by lib");
+  } catch (e) {
+    $st.textContent = "keccak lib failed to load: " + e.message;
+    console.error("[find-by-id] keccak load:", e);
+    return;
+  }
+  $st.textContent = `computing storage slot for #${id}…`;
   const idHex = BigInt(id).toString(16).padStart(64, "0");
-  const slotHex = "0".repeat(64);
+  const concat = idHex + "0".repeat(64);
   const concatBytes = new Uint8Array(64);
-  const concat = idHex + slotHex;
   for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
-  const storageKey = "0x" + keccak_256(concatBytes);
+  const hashBytes = keccak_256(concatBytes);
+  const storageKey = "0x" + Array.from(hashBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  console.log("[find-by-id] slot:", storageKey);
 
   // eth_getStorageAt
   let seedHex;
@@ -629,7 +651,7 @@ async function findById(idStr) {
     firstSeenAt: ex?.record?.firstSeenAt || now,
     lastSeenAt: now
   };
-  if (db) await dbBulkPut(db, [record]);
+  try { await dbBulkPut(await ensureDB(), [record]); } catch (e) { console.warn("[find-by-id] cache failed:", e); }
   renderCell(record);
   openModal(record);
   $st.textContent = `found uPEG #${id} — ready to mint`;
