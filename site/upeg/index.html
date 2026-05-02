@@ -558,7 +558,8 @@ $wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.v
 $wClear.onclick = exitWallet;
 
 // --- mint as ethscription ---
-const ETHSCRIBER = "0x0000000000000000000000000000000000000000"; // TODO: set after deploy
+// EOA path: send a 0 ETH tx where calldata = hex(data URI). Tx hash = ethscription ID.
+// No contract needed; spec just requires a non-contract-creation tx with the URI in calldata.
 
 // utf-8 → hex
 function strToHex(s) {
@@ -568,23 +569,16 @@ function strToHex(s) {
   return out;
 }
 
-// abi-encode `mint(string)` calldata
-function encodeMintCalldata(dataURI) {
-  const sig = "d85d3d27"; // mint(string)
-  const hex = strToHex(dataURI);
-  const lenHex = pad32(BigInt(hex.length / 2).toString(16));
-  // pad data to 32-byte boundary
-  let padded = hex;
-  if (padded.length % 64 !== 0) padded += "0".repeat(64 - (padded.length % 64));
-  // dynamic types: head = offset (0x20), tail = length + bytes
-  const offset = pad32("20");
-  return "0x" + sig + offset + lenHex + padded;
-}
-
 // browser-side base64 of an svg string (handles unicode)
 function svgToDataURI(svg) {
   const utf8 = unescape(encodeURIComponent(svg));
   return "data:image/svg+xml;base64," + btoa(utf8);
+}
+
+// SHA-256 of a string (hex output) — for uniqueness pre-check
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function mintEthscription() {
@@ -592,41 +586,59 @@ async function mintEthscription() {
   const $btn = document.getElementById("mintBtn");
   const $st = document.getElementById("mintStatus");
   if (!r || !r.svg) { $st.textContent = "no svg cached — open a unicorn the gallery has fetched"; return; }
-  if (ETHSCRIBER === "0x0000000000000000000000000000000000000000") {
-    $st.innerHTML = "ethscriber contract not deployed yet — see <code>src/UpegEthscriber.sol</code>";
-    return;
-  }
-  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask or similar"; return; }
+  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask, Rainbow, etc."; return; }
 
   $btn.disabled = true;
-  $st.textContent = "connecting wallet…";
   try {
+    const dataURI = svgToDataURI(r.svg);
+
+    // pre-check uniqueness via the public ethscriptions API
+    $st.textContent = "checking if this unicorn was already ethscribed…";
+    try {
+      const sha = await sha256Hex(dataURI);
+      const existsRes = await fetch(`https://api.ethscriptions.com/v2/ethscriptions/exists/${sha}`);
+      const existsJson = await existsRes.json();
+      if (existsJson?.result?.exists) {
+        const existing = existsJson.result.ethscription;
+        $st.innerHTML =
+          `already ethscribed → <a href="https://ethscriptions.com/ethscriptions/${existing.transaction_hash}" target="_blank" rel="noopener">view it</a>`;
+        $btn.disabled = false;
+        return;
+      }
+    } catch (_) { /* non-fatal — proceed with mint */ }
+
+    $st.textContent = "connecting wallet…";
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
     const from = accounts[0];
 
     const chainId = await window.ethereum.request({ method: "eth_chainId" });
     if (chainId !== "0x1") {
-      $st.textContent = "switch to Ethereum mainnet to mint";
+      $st.textContent = "switching to Ethereum mainnet…";
       try {
         await window.ethereum.request({
           method: "wallet_switchEthereumChain",
           params: [{ chainId: "0x1" }]
         });
-      } catch { $btn.disabled = false; return; }
+      } catch (e) {
+        $st.textContent = "please switch your wallet to Ethereum mainnet";
+        $btn.disabled = false;
+        return;
+      }
     }
 
-    const dataURI = svgToDataURI(r.svg);
-    const data = encodeMintCalldata(dataURI);
-    $st.textContent = `signing tx (${(data.length / 2 / 1024).toFixed(1)} KB calldata)…`;
+    const data = "0x" + strToHex(dataURI);
+    const kb = (data.length / 2 / 1024).toFixed(1);
+    $st.textContent = `signing 0 ETH tx with ${kb} KB calldata (≈ data URI of the SVG)…`;
 
+    // recipient = self → you're both creator and initial owner of the ethscription.
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
-      params: [{ from, to: ETHSCRIBER, value: "0x0", data }]
+      params: [{ from, to: from, value: "0x0", data }]
     });
 
     $st.innerHTML =
-      `tx sent: <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">${txHash.slice(0,10)}…${txHash.slice(-6)}</a><br>` +
-      `once mined, your ethscription will be at <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com</a>`;
+      `tx sent → <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">etherscan</a><br>` +
+      `once mined: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/ethscriptions/${txHash.slice(0,10)}…</a>`;
   } catch (e) {
     $st.textContent = "mint failed: " + (e.message || String(e));
   } finally {
