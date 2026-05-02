@@ -264,8 +264,19 @@ function openModal(r) {
     `first cached: ${fmtTime(r.firstSeenAt)}<br>` +
     `last seen: ${fmtTime(r.lastSeenAt)}`;
   document.getElementById("mintStatus").textContent = "";
-  document.getElementById("mintBtn").disabled = !r.svg;
-  document.getElementById("mintBtn").textContent = r.svg ? "mint as ethscription" : "no svg cached — can't mint";
+  const $mb = document.getElementById("mintBtn");
+  $mb.disabled = !r.svg;
+  if (!r.svg) {
+    $mb.textContent = "no svg cached — can't mint";
+  } else if (!COLLECTION_ID) {
+    $mb.textContent = `🌱 create uPEG Unicorns collection (genesis mint of #${r.id})`;
+    $mb.style.background = "#3d2a48";
+    $mb.style.borderColor = "#77443d";
+  } else {
+    $mb.textContent = `mint #${r.id} into uPEG Unicorns collection`;
+    $mb.style.background = "#2a3548";
+    $mb.style.borderColor = "#3d5277";
+  }
   $modal.classList.add("on");
 }
 
@@ -557,9 +568,13 @@ $wGo.onclick = () => openWallet($wIn.value);
 $wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.value); });
 $wClear.onclick = exitWallet;
 
-// --- mint as ethscription ---
+// --- mint as ethscription (with AppChain collection) ---
 // EOA path: send a 0 ETH tx where calldata = hex(data URI). Tx hash = ethscription ID.
-// No contract needed; spec just requires a non-contract-creation tx with the URI in calldata.
+// Collection: header-form Data URI with p=erc-721-ethscriptions-collection.
+// Set COLLECTION_ID after the one-time genesis mint to switch from
+// create_collection_and_add_self → add_self_to_collection for everyone after.
+const COLLECTION_ID = null;            // e.g. "0xabc...123" — fill in after genesis
+const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
 
 // utf-8 → hex
 function strToHex(s) {
@@ -569,16 +584,67 @@ function strToHex(s) {
   return out;
 }
 
-// browser-side base64 of an svg string (handles unicode)
-function svgToDataURI(svg) {
-  const utf8 = unescape(encodeURIComponent(svg));
-  return "data:image/svg+xml;base64," + btoa(utf8);
-}
+// base64 of an svg/string (handles unicode)
+function utf8ToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
+
+// JSON → base64 with strict insertion-order key preservation (the parser is picky).
+function jsonToB64(obj) { return btoa(JSON.stringify(obj)); }
 
 // SHA-256 of a string (hex output) — for uniqueness pre-check
 async function sha256Hex(s) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- collection payload builders (KEY ORDER MATTERS — parser rejects reorders) ----
+function buildItemJson(record) {
+  return {
+    item_index:        record.id,
+    name:              `uPEG #${record.id}`,
+    background_color:  "0b0c10",
+    description:       `uPEG unicorn #${record.id} — on-chain SVG, deterministic from seed.`,
+    attributes: [
+      { trait_type: "upeg_id", value: String(record.id) },
+      { trait_type: "seed",    value: String(record.seed) }
+    ],
+    merkle_proof: []
+  };
+}
+
+function buildCreateCollectionPayload(record) {
+  return {
+    metadata: {
+      name:             "uPEG Unicorns",
+      symbol:           "UPEG",
+      max_supply:       "1000000",
+      description:      "Ethscribed uPEG unicorns. Each one a 24×24 on-chain SVG from 0x44b28991b167582f18ba0259e0173176ca125505.",
+      logo_image_uri:   "",
+      banner_image_uri: "",
+      background_color: "0b0c10",
+      website_link:     "https://unipeg.vercel.app/upeg",
+      twitter_link:     "",
+      discord_link:     "",
+      merkle_root:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+      initial_owner:    "0x0000000000000000000000000000000000000000"
+    },
+    item: buildItemJson(record)
+  };
+}
+
+function buildAddPayload(record, collectionId) {
+  return { collection_id: collectionId, item: buildItemJson(record) };
+}
+
+// Build a header-form Data URI: data:<media>;p=<protocol>;op=<operation>;d=<b64-json>;base64,<b64-svg>
+function buildCollectionDataURI(svg, op, payload) {
+  const parts = [
+    "image/svg+xml",
+    `p=${COLLECTION_PROTOCOL}`,
+    `op=${op}`,
+    `d=${jsonToB64(payload)}`,
+    "base64"
+  ];
+  return `data:${parts.join(";")},` + utf8ToB64(svg);
 }
 
 async function mintEthscription() {
@@ -588,12 +654,18 @@ async function mintEthscription() {
   if (!r || !r.svg) { $st.textContent = "no svg cached — open a unicorn the gallery has fetched"; return; }
   if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask, Rainbow, etc."; return; }
 
+  const isGenesis = !COLLECTION_ID;
+  const op = isGenesis ? "create_collection_and_add_self" : "add_self_to_collection";
+  const payload = isGenesis
+    ? buildCreateCollectionPayload(r)
+    : buildAddPayload(r, COLLECTION_ID);
+
   $btn.disabled = true;
   try {
-    const dataURI = svgToDataURI(r.svg);
+    const dataURI = buildCollectionDataURI(r.svg, op, payload);
 
-    // pre-check uniqueness via the public ethscriptions API
-    $st.textContent = "checking if this unicorn was already ethscribed…";
+    // uniqueness pre-check by SHA256 of the full Data URI
+    $st.textContent = "checking if this unicorn is already ethscribed…";
     try {
       const sha = await sha256Hex(dataURI);
       const existsRes = await fetch(`https://api.ethscriptions.com/v2/ethscriptions/exists/${sha}`);
@@ -605,7 +677,7 @@ async function mintEthscription() {
         $btn.disabled = false;
         return;
       }
-    } catch (_) { /* non-fatal — proceed with mint */ }
+    } catch (_) { /* non-fatal */ }
 
     $st.textContent = "connecting wallet…";
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
@@ -628,17 +700,28 @@ async function mintEthscription() {
 
     const data = "0x" + strToHex(dataURI);
     const kb = (data.length / 2 / 1024).toFixed(1);
-    $st.textContent = `signing 0 ETH tx with ${kb} KB calldata (≈ data URI of the SVG)…`;
+    $st.textContent = isGenesis
+      ? `signing GENESIS tx (creates the uPEG Unicorns collection + inscribes #${r.id} as item 1) — ${kb} KB calldata`
+      : `signing tx (mints uPEG #${r.id} into the collection) — ${kb} KB calldata`;
 
-    // recipient = self → you're both creator and initial owner of the ethscription.
+    // recipient = self → user is both creator and initial owner.
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
       params: [{ from, to: from, value: "0x0", data }]
     });
 
-    $st.innerHTML =
-      `tx sent → <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">etherscan</a><br>` +
-      `once mined: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/ethscriptions/${txHash.slice(0,10)}…</a>`;
+    if (isGenesis) {
+      $st.innerHTML =
+        `<b>genesis tx sent</b> → <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">etherscan</a><br>` +
+        `once mined this becomes the COLLECTION_ID. Save it: <code>${txHash}</code><br>` +
+        `then update <code>COLLECTION_ID</code> in <code>site/upeg/index.html</code> and push.<br>` +
+        `view: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/${txHash.slice(0,10)}…</a>`;
+      console.log("UPEG_COLLECTION_GENESIS_TXHASH=" + txHash);
+    } else {
+      $st.innerHTML =
+        `tx sent → <a href="https://etherscan.io/tx/${txHash}" target="_blank" rel="noopener">etherscan</a><br>` +
+        `once mined: <a href="https://ethscriptions.com/ethscriptions/${txHash}" target="_blank" rel="noopener">ethscriptions.com/${txHash.slice(0,10)}…</a>`;
+    }
   } catch (e) {
     $st.textContent = "mint failed: " + (e.message || String(e));
   } finally {
