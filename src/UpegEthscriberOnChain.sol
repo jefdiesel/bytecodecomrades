@@ -72,13 +72,14 @@ contract UpegEthscriberOnChain {
         if (!ok) revert SvgGenerateFailed();
         string memory svg = abi.decode(ret, (string));
 
-        // Build JSON payload (key order MUST match parser spec exactly)
+        // Build JSON payload (key order MUST match parser spec exactly).
+        // item_index and max_supply MUST be strings per spec, not numbers.
         string memory upegIdStr = upegId.toString();
         string memory seedStr   = seed.toString();
         bytes memory jsonBytes = abi.encodePacked(
             '{"collection_id":"', collectionId,
-            '","item":{"item_index":', upegIdStr,
-            ',"name":"uPEG #', upegIdStr,
+            '","item":{"item_index":"', upegIdStr,
+            '","name":"uPEG #', upegIdStr,
             '","background_color":"0b0c10"',
             ',"description":"uPEG unicorn #', upegIdStr,
             '. On-chain SVG, deterministic from seed."',
@@ -87,9 +88,11 @@ contract UpegEthscriberOnChain {
             '"}],"merkle_proof":[]}}'
         );
 
-        // Build the header-form Data URI
+        // Build the header-form Data URI.
+        // rule=esip6 is MANDATORY — without it, the AppChain system contract
+        // skips the protocol handler and creates a plain ethscription instead.
         string memory dataURI = string.concat(
-            "data:image/svg+xml;p=erc-721-ethscriptions-collection;op=add_self_to_collection;d=",
+            "data:image/svg+xml;rule=esip6;p=erc-721-ethscriptions-collection;op=add_self_to_collection;d=",
             Base64.encode(jsonBytes),
             ";base64,",
             Base64.encode(bytes(svg))

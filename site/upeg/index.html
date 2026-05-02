@@ -574,15 +574,17 @@ $wClear.onclick = exitWallet;
 //   1) ETHSCRIBER_CONTRACT == null → EOA self-tx, calldata = hex(dataURI), zero fee
 //   2) ETHSCRIBER_CONTRACT set     → call mint(string) on the contract with msg.value=mintFee
 //                                    contract emits ESIP-3 event, forwards fee, refunds excess
-// Genesis 2 — sent server-side via cast after the first one (0xa5fca28f...) was
-// rejected by the AppChain parser for a 63-char merkle_root. This one is
-// verified byte-exact on chain: 64-char merkle_root, regex matches, item #19125.
-const COLLECTION_ID = "0x7d2154a90ce8def4fa18f66d1095ae2b147faf17705eb2a90caf50579589a5a7";
+// Genesis 3 — re-issued after discovering two more spec violations in v1/v2:
+//   - rule=esip6 was missing from the URI header (without it, the AppChain
+//     system contract skips collection registration entirely)
+//   - item_index was a number, not a quoted string
+// This one byte-perfect against the spec doc + verified by forge test.
+const COLLECTION_ID = "0x13d703858b162a144ec5d38b05726d39893a607a5bd070c84e795f208ebdfcab";
 const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
 // On-chain ethscriber: builds the AppChain Data URI in Solidity so calldata
 // stays tiny (~64 bytes for upegId + seed). Required because Phantom-EVM
 // rejects mint(string) calls with multi-KB string args.
-const ETHSCRIBER_CONTRACT = "0x7ccbbc0f74643a6cb52bc5c7c40eade687f1d914";
+const ETHSCRIBER_CONTRACT = "0xf196bdf2a6254487aa96ead832fd9f66f6509eed";
 const ETHSCRIBER_SEL = {
   currentPrice: "0x9d1b464a",   // currentPrice()
   mint:         "0x1b2ef1ca"    // mint(uint256,uint256) — (upegId, seed)
