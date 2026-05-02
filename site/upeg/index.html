@@ -671,7 +671,7 @@ async function mintEthscription() {
   const $btn = document.getElementById("mintBtn");
   const $st = document.getElementById("mintStatus");
   if (!r || !r.svg) { $st.textContent = "no svg cached — open a unicorn the gallery has fetched"; return; }
-  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask, Rainbow, etc."; return; }
+  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask, Rabby, Rainbow, etc."; return; }
 
   const isGenesis = !COLLECTION_ID;
   const op = isGenesis ? "create_collection_and_add_self" : "add_self_to_collection";
@@ -722,19 +722,45 @@ async function mintEthscription() {
     if (ETHSCRIBER_CONTRACT && !isGenesis) {
       // contract path: tiny calldata (upegId + seed only). Contract builds the
       // Data URI on-chain and emits the ESIP-3 event. Phantom-friendly.
-      $st.textContent = "signing…";
-      const priceHex = await call(ETHSCRIBER_CONTRACT, ETHSCRIBER_SEL.currentPrice);
+      $st.textContent = "checking price + balance…";
+      const [priceHex, balHex, feeHistory] = await Promise.all([
+        call(ETHSCRIBER_CONTRACT, ETHSCRIBER_SEL.currentPrice),
+        // eth_getBalance via the proxy
+        fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+          body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method:"eth_getBalance",
+                                  params:[from, "latest"] }) }).then(r=>r.json()).then(j=>j.result),
+        // get current base fee for explicit EIP-1559 fee setting
+        fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+          body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method:"eth_feeHistory",
+                                  params:["0x1","latest",[50]] }) }).then(r=>r.json()).then(j=>j.result)
+      ]);
       const price = BigInt(priceHex);
-      // 3M gas: actual on-chain measured 1.475M for mint (heavy on-chain Base64
-      // + string concat + log emit). Generous buffer prevents wallet estimators
-      // from rejecting the tx as "too tight". Unused gas refunds automatically.
+      const bal   = BigInt(balHex || "0x0");
+      const baseFee = BigInt(feeHistory?.baseFeePerGas?.[0] || "0x1");
+      const tip    = BigInt(2_000_000_000); // 2 gwei tip (generous for fast inclusion)
+      const maxFee = baseFee * 2n + tip;
+      const gasLimit = 3_000_000n;
+      const totalCost = price + maxFee * gasLimit;
+      if (bal < totalCost) {
+        const need = Number(totalCost) / 1e18;
+        const have = Number(bal) / 1e18;
+        $st.textContent = `wallet has ${have.toFixed(6)} ETH, mint needs ~${need.toFixed(6)} ETH (price + max gas). top up and retry.`;
+        $btn.disabled = false;
+        return;
+      }
       txParams = {
         from,
         to: ETHSCRIBER_CONTRACT,
         value: "0x" + price.toString(16),
         data: encodeMintCalldata(r.id, r.seed),
-        gas: "0x2dc6c0" // 3,000,000
+        gas: "0x" + gasLimit.toString(16),
+        // Explicit EIP-1559 fees so wallets don't have to derive them. Some
+        // wallets (notably Phantom-EVM) return -32603 if their internal fee
+        // derivation has any hiccup; pre-setting bypasses that.
+        maxFeePerGas:         "0x" + maxFee.toString(16),
+        maxPriorityFeePerGas: "0x" + tip.toString(16)
       };
+      $st.textContent = `signing…`;
     } else {
       // EOA path: zero-value self-tx, calldata = hex(dataURI). Used for genesis
       // (the contract can't mint a collection genesis on someone else's behalf since
