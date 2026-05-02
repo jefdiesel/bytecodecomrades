@@ -569,12 +569,18 @@ $wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.v
 $wClear.onclick = exitWallet;
 
 // --- mint as ethscription (with AppChain collection) ---
-// EOA path: send a 0 ETH tx where calldata = hex(data URI). Tx hash = ethscription ID.
-// Collection: header-form Data URI with p=erc-721-ethscriptions-collection.
-// Set COLLECTION_ID after the one-time genesis mint to switch from
-// create_collection_and_add_self → add_self_to_collection for everyone after.
+// Two paths:
+//   1) ETHSCRIBER_CONTRACT == null → EOA self-tx, calldata = hex(dataURI), zero fee
+//   2) ETHSCRIBER_CONTRACT set     → call mint(string) on the contract with msg.value=mintFee
+//                                    contract emits ESIP-3 event, forwards fee, refunds excess
 const COLLECTION_ID = "0xa5fca28f2dce1b3ffa425e51e23c59d45586d010d9da403d1c39c88633ae368a";
 const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
+const ETHSCRIBER_CONTRACT = null;       // "0x..." after deploy; null = free EOA path
+// Selectors for UpegEthscriber
+const ETHSCRIBER_SEL = {
+  currentPrice: "0x9d1b464a",   // currentPrice()
+  mint:         "0xd85d3d27"    // mint(string)
+};
 
 // utf-8 → hex
 function strToHex(s) {
@@ -634,6 +640,18 @@ function buildCreateCollectionPayload(record) {
 
 function buildAddPayload(record, collectionId) {
   return { collection_id: collectionId, item: buildItemJson(record) };
+}
+
+// ABI-encode a `mint(string contentURI)` call (selector 0xd85d3d27).
+// Layout: selector | offset(0x20) | length | data padded to 32-byte boundary
+function encodeMintStringCalldata(s) {
+  const sig = "d85d3d27";
+  const hex = strToHex(s);
+  const lenHex = pad32(BigInt(hex.length / 2).toString(16));
+  let padded = hex;
+  if (padded.length % 64 !== 0) padded += "0".repeat(64 - (padded.length % 64));
+  const offset = pad32("20");
+  return "0x" + sig + offset + lenHex + padded;
 }
 
 // Build a header-form Data URI: data:<media>;p=<protocol>;op=<operation>;d=<b64-json>;base64,<b64-svg>
@@ -699,16 +717,35 @@ async function mintEthscription() {
       }
     }
 
-    const data = "0x" + strToHex(dataURI);
-    const kb = (data.length / 2 / 1024).toFixed(1);
-    $st.textContent = isGenesis
-      ? `signing GENESIS tx (creates the uPEG Unicorns collection + inscribes #${r.id} as item 1) — ${kb} KB calldata`
-      : `signing tx (mints uPEG #${r.id} into the collection) — ${kb} KB calldata`;
+    // Build tx params — either EOA self-tx or contract call.
+    let txParams;
+    if (ETHSCRIBER_CONTRACT && !isGenesis) {
+      // contract path: live-read currentPrice(), send msg.value=price (contract refunds excess)
+      $st.textContent = "signing…";
+      const priceHex = await call(ETHSCRIBER_CONTRACT, ETHSCRIBER_SEL.currentPrice);
+      const price = BigInt(priceHex);
+      txParams = {
+        from,
+        to: ETHSCRIBER_CONTRACT,
+        value: "0x" + price.toString(16),
+        data: encodeMintStringCalldata(dataURI)
+      };
+    } else {
+      // EOA path: zero-value self-tx, calldata = hex(dataURI). Used for genesis
+      // (the contract can't mint a collection genesis on someone else's behalf since
+      // the L1 indexer treats the contract address as a different actor) and for
+      // the no-contract fallback.
+      const data = "0x" + strToHex(dataURI);
+      const kb = (data.length / 2 / 1024).toFixed(1);
+      txParams = { from, to: from, value: "0x0", data };
+      $st.textContent = isGenesis
+        ? `signing GENESIS tx (creates the uPEG Unicorns collection + inscribes #${r.id} as item 1) — ${kb} KB calldata`
+        : `signing tx (mints uPEG #${r.id} into the collection, no fee) — ${kb} KB calldata`;
+    }
 
-    // recipient = self → user is both creator and initial owner.
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
-      params: [{ from, to: from, value: "0x0", data }]
+      params: [txParams]
     });
 
     if (isGenesis) {
