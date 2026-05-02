@@ -93,8 +93,9 @@
 const RPC   = "/api/rpc?chain=eth-mainnet";
 const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
 const SEL = {
-  randomSeed: "0x0b747d91",   // randomSeed()
-  generate:   "0x4a7dd523"    // generate(uint256)
+  randomSeed:     "0x0b747d91",   // randomSeed()
+  generate:       "0x4a7dd523",   // generate(uint256)
+  getImageParams: "0xf68de33d"    // getImageParams()
 };
 
 let rpcId = 0;
@@ -115,19 +116,95 @@ function decodeString(hex) {
   for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
   return s;
 }
-function decodeTraits(seedStr){
-  const s = BigInt(seedStr);
-  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
-  return {
-    background: b(0),
-    horn: b(1), accessories: b(2), hair: b(3), wings: b(4), tail: b(5),
-    legsFront: b(6), legsBack: b(7), eyes: b(8), body: b(9), ground: b(10),
-    bodyColor: b(11), eyesColor: b(12), hairColor: b(13),
-    hornColor: b(14), groundColor: b(15), accessoriesColor: b(16), tailColor: b(17),
-  };
-}
 function optionalCount(t) {
   return (t.horn?1:0)+(t.accessories?1:0)+(t.hair?1:0)+(t.wings?1:0)+(t.tail?1:0)+(t.ground?1:0);
+}
+
+// Decode getImageParams() return: (uint8, uint8, uint256, uint256, ...) — 12 fields
+function decodeImageParams(hex) {
+  const data = hex.replace(/^0x/, "");
+  // Each value is 32 bytes = 64 hex chars
+  const slot = i => parseInt(data.slice(i*64, (i+1)*64).slice(-8), 16);  // bottom 4 bytes is plenty
+  return {
+    colorsCount:           slot(0),
+    backgroundColorsCount: slot(1),
+    accessoriesCount:      slot(2),
+    bodyCount:             slot(3),
+    eyesCount:             slot(4),
+    hairCount:             slot(5),
+    hornCount:             slot(6),
+    legsFrontCount:        slot(7),
+    legsBackCount:         slot(8),
+    tailCount:             slot(9),
+    groundCount:           slot(10),
+    wingsCount:            slot(11),
+  };
+}
+
+// Simulate Upeg.sol _nextUpeg(Random) — pulls bytes from keccak(seed, ++nonce) per pick.
+// This is what the contract does AFTER randomizeSeed runs in afterSwap.
+async function simulateNextUpeg(randomSeed, p) {
+  const k = await keccak();
+  let nonce = 0n;
+  function next() {
+    nonce += 1n;
+    const buf = new Uint8Array(64);
+    const seedHex  = BigInt(randomSeed).toString(16).padStart(64, "0");
+    const nonceHex = nonce.toString(16).padStart(64, "0");
+    buf.set(hexToBytes(seedHex),  0);
+    buf.set(hexToBytes(nonceHex), 32);
+    return BigInt("0x" + bytesToHex(k(buf)));
+  }
+  const chance    = (prob) => (next() % 100n) < BigInt(prob);
+  const pickId    = (count) => count === 0 ? 0 : Number(next() % BigInt(count)) + 1;
+  const pickColor = (max)   => max === 0 ? 0 : Number(next() % BigInt(max));
+
+  const t = {
+    background:0, horn:0, accessories:0, hair:0, wings:0, tail:0,
+    legsFront:0, legsBack:0, eyes:0, body:0, ground:0,
+    bodyColor:0, eyesColor:0, hairColor:0, hornColor:0,
+    groundColor:0, accessoriesColor:0, tailColor:0
+  };
+
+  // Order MUST match Upeg.sol _nextUpeg exactly — each next() consumes a slot.
+  t.background = p.backgroundColorsCount === 0 ? 0 : Number(next() % BigInt(p.backgroundColorsCount));
+  if (chance(20)) { t.horn = pickId(p.hornCount); if (t.horn) t.hornColor = pickColor(p.colorsCount); }
+  if (chance(30)) { t.accessories = pickId(p.accessoriesCount); if (t.accessories) t.accessoriesColor = pickColor(p.colorsCount); }
+  if (chance(80)) { t.hair = pickId(p.hairCount); if (t.hair) t.hairColor = pickColor(p.colorsCount); }
+  if (chance(30)) { t.wings = pickId(p.wingsCount); }
+  if (chance(80)) { t.tail = pickId(p.tailCount); if (t.tail) t.tailColor = pickColor(p.colorsCount); }
+  t.legsFront = pickId(p.legsFrontCount);
+  t.legsBack  = pickId(p.legsBackCount);
+  t.eyes = pickId(p.eyesCount); if (t.eyes) t.eyesColor = pickColor(p.colorsCount);
+  t.body = pickId(p.bodyCount); if (t.body) t.bodyColor = pickColor(p.colorsCount);
+  t.ground = pickId(p.groundCount); if (t.ground) t.groundColor = pickColor(p.colorsCount);
+
+  return t;
+}
+
+// Pack traits into uint256 per UpegMetadataLibrary.encode layout.
+function packTraits(t) {
+  let s = 0n;
+  const put = (v, sh) => s |= BigInt(v) << BigInt(sh);
+  put(t.background, 0);
+  put(t.horn, 8);
+  put(t.accessories, 16);
+  put(t.hair, 24);
+  put(t.wings, 32);
+  put(t.tail, 40);
+  put(t.legsFront, 48);
+  put(t.legsBack, 56);
+  put(t.eyes, 64);
+  put(t.body, 72);
+  put(t.ground, 80);
+  put(t.bodyColor, 88);
+  put(t.eyesColor, 96);
+  put(t.hairColor, 104);
+  put(t.hornColor, 112);
+  put(t.groundColor, 120);
+  put(t.accessoriesColor, 128);
+  put(t.tailColor, 136);
+  return s.toString();
 }
 
 // keccak via @noble/hashes — known good loader
@@ -213,9 +290,19 @@ function renderTraits(t, container) {
   ).join("");
 }
 
+let cachedParams = null;
+async function getParams() {
+  if (cachedParams) return cachedParams;
+  const raw = await rpc("eth_call", [{ to: HOOK, data: SEL.getImageParams }, "latest"]);
+  cachedParams = decodeImageParams(raw);
+  return cachedParams;
+}
+
 async function refresh() {
   $("block").textContent = "loading...";
   try {
+    const params = await getParams();
+
     const blk = await rpc("eth_getBlockByNumber", ["latest", false]);
     const bn = parseInt(blk.number, 16);
     const ts = parseInt(blk.timestamp, 16);
@@ -232,25 +319,31 @@ async function refresh() {
     const count = cd ? cd.count : "0";
     $("count").textContent = cd ? `${count} (slot ${cd.seedSlot+1})` : "couldn't find slot — using 0";
 
-    const next = await nextSeed(currentSeed, count, ts, pr, bn);
-    $("nextSeed").textContent = next;
-    const t = decodeTraits(next);
-    const rar = rarityLabel(t);
-    $("rarity").innerHTML = `<span class="badge ${rar.cls}">${rar.label}</span>`;
-    renderTraits(t, $("nextTraits"));
-    $("nextArt").innerHTML = await fetchSvg(next);
+    // Step 1: compute next _randomSeed (after a swap fires _randomizeSeed in afterSwap)
+    const nextRandSeed = await nextSeed(currentSeed, count, ts, pr, bn);
+    // Step 2: simulate _nextUpeg consuming that random seed via Random.next()
+    const traits = await simulateNextUpeg(nextRandSeed, params);
+    // Step 3: pack into uint256 metadata seed for the renderer
+    const packedSeed = packTraits(traits);
 
+    $("nextSeed").textContent = packedSeed + "  (raw: " + nextRandSeed + ")";
+    const rar = rarityLabel(traits);
+    $("rarity").innerHTML = `<span class="badge ${rar.cls}">${rar.label}</span>`;
+    renderTraits(traits, $("nextTraits"));
+    $("nextArt").innerHTML = await fetchSvg(packedSeed);
+
+    // Future 24 swaps: chain through the same seed-update logic
     $("future").innerHTML = "loading 24 candidates...";
     const cells = [];
     let s = currentSeed, c = BigInt(count);
     for (let i = 1; i <= 24; i++) {
       s = await nextSeed(s, c.toString(), ts, pr, bn);
       c += 1n;
-      cells.push({ seed: s, idx: i });
+      const t = await simulateNextUpeg(s, params);
+      cells.push({ seed: packTraits(t), idx: i, t });
     }
     await Promise.all(cells.map(async cell => {
       cell.svg = await fetchSvg(cell.seed);
-      cell.t = decodeTraits(cell.seed);
     }));
     $("future").innerHTML = cells.map(cell => {
       const oc = optionalCount(cell.t);
