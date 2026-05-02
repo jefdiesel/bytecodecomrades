@@ -686,6 +686,10 @@ function listAllWallets() {
   } else if (window.ethereum) {
     candidates.push({ provider: window.ethereum, name: providerName(window.ethereum) });
   }
+  // Phantom-specific direct injection (sometimes works when window.ethereum proxy doesn't)
+  if (window.phantom?.ethereum) {
+    candidates.push({ provider: window.phantom.ethereum, name: "Phantom (direct)" });
+  }
   const seen = new Set(); const uniq = [];
   for (const c of candidates) { if (!seen.has(c.provider)) { seen.add(c.provider); uniq.push(c); } }
   return uniq;
