@@ -666,12 +666,68 @@ function buildCollectionDataURI(svg, op, payload) {
   return `data:${parts.join(";")},` + utf8ToB64(svg);
 }
 
+// EIP-6963 wallet discovery — collects every wallet that announces itself.
+const announcedWallets = [];
+window.addEventListener("eip6963:announceProvider", e => {
+  announcedWallets.push(e.detail);
+});
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+// Try every installed provider in turn until one returns accounts.
+// Phantom-EVM frequently throws -32603 on eth_requestAccounts when its EVM
+// mode isn't enabled — but if the user has another wallet installed too
+// (MetaMask, Rabby, Coinbase), this falls through to it instead of dying.
+async function connectAnyWallet() {
+  const candidates = [];
+  // EIP-6963: modern multi-wallet discovery
+  for (const w of announcedWallets) candidates.push({ provider: w.provider, name: w.info?.name });
+  // Legacy: window.ethereum + .providers
+  if (Array.isArray(window.ethereum?.providers)) {
+    for (const p of window.ethereum.providers) candidates.push({ provider: p, name: providerName(p) });
+  } else if (window.ethereum) {
+    candidates.push({ provider: window.ethereum, name: providerName(window.ethereum) });
+  }
+  // Dedup
+  const seen = new Set(); const uniq = [];
+  for (const c of candidates) { if (!seen.has(c.provider)) { seen.add(c.provider); uniq.push(c); } }
+  if (uniq.length === 0) throw new Error("no wallet detected — install MetaMask, Rabby, Rainbow, etc.");
+
+  // Sort: non-Phantom first since Phantom-EVM is the usual culprit
+  uniq.sort((a, b) => (a.provider.isPhantom ? 1 : 0) - (b.provider.isPhantom ? 1 : 0));
+
+  let lastErr;
+  for (const c of uniq) {
+    try {
+      const accounts = await c.provider.request({ method: "eth_requestAccounts" });
+      if (accounts?.length) {
+        console.log("[upeg-mint] connected via", c.name);
+        return { provider: c.provider, name: c.name, account: accounts[0] };
+      }
+    } catch (e) {
+      console.warn("[upeg-mint]", c.name, "refused:", e?.message || e);
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("all wallets refused to connect");
+}
+function providerName(p) {
+  if (p.isMetaMask) return "MetaMask";
+  if (p.isRabby) return "Rabby";
+  if (p.isRainbow) return "Rainbow";
+  if (p.isCoinbaseWallet) return "Coinbase";
+  if (p.isPhantom) return "Phantom";
+  return "Wallet";
+}
+
 async function mintEthscription() {
   const r = currentModalRecord;
   const $btn = document.getElementById("mintBtn");
   const $st = document.getElementById("mintStatus");
   if (!r || !r.svg) { $st.textContent = "no svg cached — open a unicorn the gallery has fetched"; return; }
-  if (!window.ethereum) { $st.textContent = "no wallet detected — install MetaMask, Rabby, Rainbow, etc."; return; }
+  if (!window.ethereum && announcedWallets.length === 0) {
+    $st.textContent = "no wallet detected — install MetaMask, Rabby, Rainbow, etc.";
+    return;
+  }
 
   const isGenesis = !COLLECTION_ID;
   const op = isGenesis ? "create_collection_and_add_self" : "add_self_to_collection";
@@ -699,14 +755,16 @@ async function mintEthscription() {
     } catch (_) { /* non-fatal */ }
 
     $st.textContent = "connecting wallet…";
-    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-    const from = accounts[0];
+    const conn = await connectAnyWallet();
+    const wallet = conn.provider;
+    const from = conn.account;
+    $st.textContent = `connected via ${conn.name}`;
 
-    const chainId = await window.ethereum.request({ method: "eth_chainId" });
+    const chainId = await wallet.request({ method: "eth_chainId" });
     if (chainId !== "0x1") {
-      $st.textContent = "switching to Ethereum mainnet…";
+      $st.textContent = `switching ${conn.name} to Ethereum mainnet…`;
       try {
-        await window.ethereum.request({
+        await wallet.request({
           method: "wallet_switchEthereumChain",
           params: [{ chainId: "0x1" }]
         });
@@ -776,7 +834,7 @@ async function mintEthscription() {
     }
 
     console.log("[upeg-mint] sending tx", txParams);
-    const txHash = await window.ethereum.request({
+    const txHash = await wallet.request({
       method: "eth_sendTransaction",
       params: [txParams]
     });
