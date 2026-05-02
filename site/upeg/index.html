@@ -573,9 +573,13 @@ $wClear.onclick = exitWallet;
 //   1) ETHSCRIBER_CONTRACT == null → EOA self-tx, calldata = hex(dataURI), zero fee
 //   2) ETHSCRIBER_CONTRACT set     → call mint(string) on the contract with msg.value=mintFee
 //                                    contract emits ESIP-3 event, forwards fee, refunds excess
-const COLLECTION_ID = "0xa5fca28f2dce1b3ffa425e51e23c59d45586d010d9da403d1c39c88633ae368a";
+// Genesis 1 (0xa5fca28f...) was rejected by the AppChain parser due to a
+// merkle_root that was 63 hex chars instead of 64 — possibly stale-cache, possibly
+// a one-off encoding glitch. Resetting to null so the next click does a fresh
+// genesis that we then verify byte-exact before re-pinning.
+const COLLECTION_ID = null;
 const COLLECTION_PROTOCOL = "erc-721-ethscriptions-collection";
-const ETHSCRIBER_CONTRACT = null;       // "0x..." after deploy; null = free EOA path
+const ETHSCRIBER_CONTRACT = "0xA95Da3A380DB95F123C6B674F701B780C3166892"; // mainnet, linear curve
 // Selectors for UpegEthscriber
 const ETHSCRIBER_SEL = {
   currentPrice: "0x9d1b464a",   // currentPrice()
@@ -631,7 +635,7 @@ function buildCreateCollectionPayload(record) {
       website_link:     "https://unipeg.vercel.app/upeg",
       twitter_link:     "",
       discord_link:     "",
-      merkle_root:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+      merkle_root:      "0x" + "0".repeat(64),  // bytes32(0) — always 64 hex chars
       initial_owner:    "0x0000000000000000000000000000000000000000"
     },
     item: buildItemJson(record)
