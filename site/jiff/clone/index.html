@@ -439,16 +439,31 @@ $("pollOnce").onclick = pollOnce;
 $("pollToggle").onclick = () => pollInterval ? stopPolling() : startPolling(12000);
 $("pollFast").onclick = () => startPolling(4000);
 
+function renderCriteria() {
+  const minLevel = $("minLevel").value;
+  $("targetTraits").innerHTML =
+    `<div class="t"><span class="k">min level</span><span class="v">≥ L${minLevel}</span></div>` +
+    `<div class="t"><span class="k">P(hit) base</span><span class="v">${minLevel==="4"?"~3.2%":"~9.7%"}</span></div>` +
+    `<div class="t"><span class="k">attack</span><span class="v">LP withdraw</span></div>` +
+    `<div class="t"><span class="k">churns seed?</span><span class="v">no (afterSwap only)</span></div>` +
+    `<div class="t"><span class="k">poll cadence</span><span class="v">12s / 4s</span></div>` +
+    `<div class="t"><span class="k">action</span><span class="v">fire on hit</span></div>`;
+}
+
 $("mode").onchange = () => {
   const m = getMode();
   $("cloneRow").style.display = m === "clone" ? "" : "none";
   $("levelRow").style.display = m === "level" ? "" : "none";
   if (m === "level") {
     $("leftLabel").textContent = "criteria";
-    $("targetArt").innerHTML = "";
-    $("targetTraits").innerHTML = `<div class="t"><span class="k">min level</span><span class="v">≥${$("minLevel").value}</span></div>`;
+    $("targetArt").style.display = "none";
+    renderCriteria();
+  } else {
+    $("leftLabel").textContent = "TARGET";
+    $("targetArt").style.display = "";
   }
 };
+$("minLevel").addEventListener("change", () => { if (getMode() === "level") renderCriteria(); });
 $("mode").dispatchEvent(new Event("change"));
 
 // auto-start in level mode
