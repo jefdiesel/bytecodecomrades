@@ -107,15 +107,32 @@
 </div>
 
 <div class="panel">
+  <h2>pool sanity</h2>
+  <div class="stats-row">
+    <div><span class="k">JIFF in pool (PoolManager)</span><span class="v" id="poolReserve">—</span></div>
+    <div><span class="k">PoolManager ETH balance</span><span class="v" id="pmEth">—</span></div>
+    <div><span class="k">randomSeed last changed</span><span class="v" id="seedChangeAt">—</span></div>
+    <div><span class="k">since last change</span><span class="v" id="seedAge">—</span></div>
+  </div>
+  <div class="row" style="margin-top: 8px">
+    <button id="connectLP">check my LP positions</button>
+    <span id="lpStatus" style="color:#888;margin-left:8px"></span>
+  </div>
+  <div id="lpList" style="font-size:11px;color:#ccc;margin-top:6px"></div>
+</div>
+
+<div class="panel">
   <h2>polling</h2>
   <div class="row" style="display:block">
     <button id="pollToggle" class="primary">start polling (every 12s)</button>
     <button id="pollFast">fast poll (every 4s)</button>
+    <button id="pollWatch">watch (1s seed-only, sim on change)</button>
     <button id="pollOnce">poll once</button>
   </div>
   <div class="stats-row" style="margin-top: 12px">
     <div><span class="k">attempts</span><span class="v" id="attempts">0</span></div>
     <div><span class="k">matches found</span><span class="v" id="matchesCount">0</span></div>
+    <div><span class="k">seed changes seen</span><span class="v" id="seedChanges">0</span></div>
     <div><span class="k">last poll</span><span class="v" id="lastPoll">—</span></div>
     <div><span class="k">current hook seed</span><span class="v" id="curSeed" style="font-size:10px;max-width:300px">—</span></div>
   </div>
@@ -454,24 +471,167 @@ async function pollOnce() {
 }
 
 let pollInterval = null;
-function startPolling(ms) {
+let watchInterval = null;
+let lastSeedHex = null;
+let lastSeedChangeAt = null;
+let seedChanges = 0;
+
+function stopAllPolling() {
   if (pollInterval) clearInterval(pollInterval);
+  if (watchInterval) clearInterval(watchInterval);
+  pollInterval = null;
+  watchInterval = null;
+  $("pollToggle").textContent = "start polling (every 12s)";
+  $("pollWatch").textContent = "watch (1s seed-only, sim on change)";
+  $("pollWatch").classList.remove("primary");
+}
+
+function startPolling(ms) {
+  stopAllPolling();
   pollInterval = setInterval(pollOnce, ms);
   pollOnce();
   $("pollToggle").textContent = "stop polling";
-  log(`polling every ${ms/1000}s`, "alert");
+  log(`polling every ${ms/1000}s (full sim each tick)`, "alert");
 }
-function stopPolling() {
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = null;
-  $("pollToggle").textContent = "start polling (every 12s)";
-  log("stopped", "miss");
+
+// Cheap "watch" mode: poll only randomSeed() every 1s; full-sim only on change.
+// Saves RPC calls when the pool is quiet (no swaps = seed unchanged = no need to re-sim).
+async function watchTick() {
+  try {
+    const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
+    const now = new Date();
+    if (lastSeedHex === null) {
+      lastSeedHex = seedHex;
+      $("seedChangeAt").textContent = "(initial read)";
+    } else if (seedHex !== lastSeedHex) {
+      // seed rolled — that means a swap happened against the pool
+      seedChanges++;
+      lastSeedHex = seedHex;
+      lastSeedChangeAt = now;
+      $("seedChangeAt").textContent = now.toLocaleTimeString();
+      $("seedChanges").textContent = seedChanges;
+      log(`seed rolled (swap fired) — re-simulating`, "alert");
+      await pollOnce();  // full sim with new seed
+    } else if (lastSeedChangeAt) {
+      const ageS = Math.round((now - lastSeedChangeAt) / 1000);
+      $("seedAge").textContent = ageS + "s";
+    }
+  } catch (e) {
+    log("watch error: " + e.message, "miss");
+  }
+}
+
+function startWatch() {
+  stopAllPolling();
+  $("pollWatch").textContent = "stop watch";
+  $("pollWatch").classList.add("primary");
+  watchInterval = setInterval(watchTick, 1000);
+  pollOnce(); // initial full sim
+  log("watch mode: 1s seed poll, re-sim only when pool churns", "alert");
 }
 
 $("loadTarget").onclick = loadTarget;
 $("pollOnce").onclick = pollOnce;
-$("pollToggle").onclick = () => pollInterval ? stopPolling() : startPolling(12000);
+$("pollToggle").onclick = () => (pollInterval || watchInterval) ? stopAllPolling() : startPolling(12000);
 $("pollFast").onclick = () => startPolling(4000);
+$("pollWatch").onclick = () => (watchInterval) ? stopAllPolling() : startWatch();
+
+// ---- pool sanity (always-on background) ----
+async function refreshPoolSanity() {
+  try {
+    // JIFF.balanceOf(PoolManager)
+    const PM = "0x000000000004444c5dc75cb358380d2e3de08a90";
+    const balRaw = await rpc("eth_call", [{ to: TOKEN, data: "0x70a08231" + pad32(PM.slice(2)) }, "latest"]);
+    const bal = BigInt(balRaw);
+    $("poolReserve").textContent = (Number(bal) / 1e18).toFixed(3) + " JIFF";
+    // PoolManager ETH balance
+    const ethRaw = await rpc("eth_getBalance", [PM, "latest"]);
+    const eth = BigInt(ethRaw);
+    $("pmEth").textContent = (Number(eth) / 1e18).toFixed(4) + " ETH (all pools)";
+  } catch (e) {
+    $("poolReserve").textContent = "err: " + e.message;
+  }
+}
+refreshPoolSanity();
+setInterval(refreshPoolSanity, 30000);
+
+// ---- LP position check via v4 PositionManager ----
+const POSMGR = "0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e"; // v4 PositionManager mainnet
+
+async function connectAndCheckLP() {
+  $("lpStatus").textContent = "connecting wallet…";
+  $("lpList").innerHTML = "";
+  try {
+    if (!window.ethereum) throw new Error("no wallet detected");
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const addr = accounts[0];
+    $("lpStatus").textContent = `connected ${addr.slice(0,6)}…${addr.slice(-4)}; checking PositionManager…`;
+
+    // ERC721 balanceOf
+    const balRaw = await rpc("eth_call", [{ to: POSMGR, data: "0x70a08231" + pad32(addr.slice(2)) }, "latest"]);
+    const lpCount = Number(BigInt(balRaw));
+    if (lpCount === 0) {
+      $("lpStatus").innerHTML = `you hold <b>0</b> v4 LP NFTs. The H2 stale-seed clone attack requires holding an LP position in the JIFF pool. <a href="https://app.uniswap.org/positions/v4" target="_blank">add liquidity →</a>`;
+      return;
+    }
+
+    $("lpStatus").textContent = `you hold ${lpCount} v4 LP NFTs · enumerating…`;
+
+    // PositionManager doesn't implement ERC721Enumerable. We can scan Transfer
+    // events filtered by 'to=addr' but eth_getLogs is gated on this RPC. Instead,
+    // we ask the user to paste tokenIds, OR walk a small range trying ownerOf.
+    // For now: take user input.
+    $("lpList").innerHTML = `
+      <div style="margin-top:6px">Paste your LP tokenId(s), comma-separated. Find them in your wallet's NFT list or
+      <a href="https://etherscan.io/address/${POSMGR}#tokentxnsErc721?a=${addr}" target="_blank">on etherscan</a>.</div>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <input id="lpIds" placeholder="e.g. 12345, 12346" style="background:#0b0c10;color:#e8e8e8;border:1px solid #2a2e36;padding:5px 10px;border-radius:3px;font:inherit;flex:1">
+        <button id="lpCheck">check</button>
+      </div>
+      <div id="lpResults" style="margin-top:8px"></div>
+    `;
+    document.getElementById("lpCheck").onclick = async () => {
+      const ids = document.getElementById("lpIds").value.split(",").map(s=>s.trim()).filter(Boolean);
+      const out = [];
+      for (const id of ids) {
+        try {
+          // PositionManager.getPoolAndPositionInfo(uint256) → (PoolKey, PositionInfo)
+          // selector: keccak("getPoolAndPositionInfo(uint256)")[:4] = 0x7ba03aad
+          const data = "0x7ba03aad" + pad32(BigInt(id).toString(16));
+          const r = await rpc("eth_call", [{ to: POSMGR, data }, "latest"]);
+          const d = r.replace(/^0x/, "");
+          // PoolKey is (currency0, currency1, fee, tickSpacing, hooks) = 5 * 32 bytes = 160 bytes
+          const c0 = "0x" + d.slice(0, 64).slice(-40);
+          const c1 = "0x" + d.slice(64, 128).slice(-40);
+          const fee = parseInt(d.slice(128, 192).slice(-8), 16);
+          let ts = parseInt(d.slice(192, 256).slice(-8), 16);
+          if (ts >= 0x800000) ts -= 0x1000000;
+          const hooks = "0x" + d.slice(256, 320).slice(-40);
+          const isJiff = hooks.toLowerCase() === HOOK.toLowerCase();
+          out.push({ id, c0, c1, fee, ts, hooks, isJiff });
+        } catch (e) {
+          out.push({ id, err: e.message });
+        }
+      }
+      document.getElementById("lpResults").innerHTML = out.map(p =>
+        p.err ? `<div style="color:#f66">#${p.id}: ${p.err}</div>` :
+        `<div style="${p.isJiff?'color:#6f6;font-weight:600':'color:#888'}">
+          ${p.isJiff ? "✓ JIFF POOL" : "(other pool)"} · LP #${p.id} · fee=${p.fee} · ts=${p.ts}
+          · c0=${p.c0.slice(0,8)}… · hook=${p.hooks.slice(0,8)}…
+        </div>`
+      ).join("");
+      const jiffLP = out.filter(p => p.isJiff);
+      if (jiffLP.length) {
+        $("lpStatus").innerHTML = `<span style="color:#6f6">✓ you hold ${jiffLP.length} LP position(s) in the JIFF pool</span> — H2 attack is available to you`;
+      } else {
+        $("lpStatus").innerHTML = `none of those tokenIds are in the JIFF pool`;
+      }
+    };
+  } catch (e) {
+    $("lpStatus").textContent = "error: " + e.message;
+  }
+}
+$("connectLP").onclick = connectAndCheckLP;
 
 function renderCriteria() {
   const minLevel = $("minLevel").value;
