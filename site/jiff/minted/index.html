@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — recent mints (event scanner)</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  #status { color: #8a8f99; font-size: 12px; margin: 12px 0; min-height: 16px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .card { background: #16181d; border-radius: 4px; padding: 0; overflow: hidden; cursor: pointer; position: relative; }
+  .card .art { aspect-ratio: 1; background: #0b0c10; image-rendering: pixelated; position: relative; }
+  .card .art svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .card .lv { position: absolute; top: 4px; right: 4px; background: #000c; color: #fff; padding: 1px 5px; font-size: 10px; border-radius: 2px; }
+  .card .lv.l4 { background: #ffc; color: #000; font-weight: 600; }
+  .card .lv.l3 { background: #fcf; color: #000; font-weight: 600; }
+  .card .meta { padding: 6px 8px; font-size: 11px; line-height: 1.5; }
+  .card .meta .id { color: #fff; font-weight: 600; }
+  .card .meta .owner { color: #6cf; }
+  .card .meta .blk { color: #888; }
+  .empty { color: #666; padding: 40px; text-align: center; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 16px; font-size: 12px; }
+  .toolbar input { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36; padding: 5px 10px; border-radius: 3px; font: inherit; }
+  .toolbar button { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36; padding: 5px 10px; border-radius: 3px; cursor: pointer; font: inherit; }
+  .toolbar button:hover { background: #262a32; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 16px; }
+  .panel h2 { font-size: 12px; margin: 0 0 10px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .ranks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; font-size: 11px; }
+  .rank { background: #0b0c10; padding: 6px 10px; border-radius: 3px; display: flex; justify-content: space-between; }
+  .rank.suspect { background: #2d1810; border-left: 3px solid #f60; }
+  .rank a { color: #6cf; text-decoration: none; }
+  .rank .b { color: #fff; font-weight: 600; }
+  .lvbadges { display: flex; gap: 4px; }
+  .lvbadges span { background: #1d2026; padding: 1px 4px; border-radius: 2px; color: #ccc; font-size: 10px; }
+  .lvbadges span.l4 { background: #ffc; color: #000; font-weight: 600; }
+  .lvbadges span.l3 { background: #fcf; color: #000; font-weight: 600; }
+  /* modal */
+  #modal { position: fixed; inset: 0; background: #000c; display: none;
+           align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  #modal.on { display: flex; }
+  #modal .box { background: #16181d; border-radius: 6px; padding: 18px;
+                max-width: 460px; width: 100%; max-height: 90vh; overflow: auto; }
+  #modal .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+                background: #0b0c10; border-radius: 4px; margin-bottom: 12px; }
+  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.7; }
+  #modal .meta b { color: #fff; }
+  #modal .meta a { color: #6cf; text-decoration: none; }
+  #modal .x { float: right; color: #888; cursor: pointer; padding: 0 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — recent mints (chain event scanner)</h1>
+  <div class="sub">
+    Scans <code>OnUpegMinted</code> events from the JIFF token and decorates each with seed, level, owner, tx.
+    Useful for: spotting snipers (any address with disproportionate L4 ownership), watching your own mint outcomes,
+    auditing the rarity distribution.
+    <br>← <a href="/jiff">gallery</a> · <a href="/jiff/predict">predictor</a> · <a href="/jiff/grind">grinder</a> · <a href="/jiff/clone">clone sniper</a>
+  </div>
+</header>
+
+<div class="toolbar">
+  <label>scan last <input id="blockBack" type="number" value="50400" min="100" style="width:100px"> blocks</label>
+  <button id="rescan">scan</button>
+  <button id="deepScan" title="scan all the way back, slow">deep scan (all time)</button>
+  <span id="counts" style="color:#8a8f99"></span>
+</div>
+
+<div class="panel">
+  <h2>top recipients in scanned window (L3/L4 highlighted)</h2>
+  <div class="ranks" id="ranks"></div>
+</div>
+
+<div id="status">loading…</div>
+<div id="grid"></div>
+
+<div id="modal" onclick="if(event.target.id==='modal')this.classList.remove('on')">
+  <div class="box">
+    <span class="x" onclick="document.getElementById('modal').classList.remove('on')">✕</span>
+    <div class="art" id="modalArt"></div>
+    <div class="meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const RPC = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1";
+const HOOK  = "0x4839ed1943afdeb68e898999b311bdf7879c4440";
+const ONUPEGMINTED_TOPIC = "0xba672d3bb0dbc4a96e8acab68a5e7516856ae3b3e765a36fb04c0a12233500cb";
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params })
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  return j.result;
+}
+async function call(to, data) { return rpc("eth_call", [{ to, data }, "latest"]); }
+
+function pad32(h){ return h.replace(/^0x/,"").toLowerCase().padStart(64,"0"); }
+function bytesToHex(b) { return Array.from(b).map(x => x.toString(16).padStart(2,"0")).join(""); }
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  let s = "";
+  for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
+  return s;
+}
+function levelOf(seedStr) { return Number((BigInt(seedStr) >> 112n) & 0xFFn); }
+function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
+
+let _k = null;
+async function keccak() {
+  if (_k) return _k;
+  const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+  _k = noble.keccak_256;
+  return _k;
+}
+
+// Read _jiffs[id] from JIFF token storage. Slot 0 mapping → keccak256(id || 0)
+async function readSeed(id) {
+  const k = await keccak();
+  const idHex = BigInt(id).toString(16).padStart(64, "0");
+  const concat = idHex + "0".repeat(64);
+  const concatBytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
+  const slotBytes = k(concatBytes);
+  const slot = "0x" + bytesToHex(slotBytes);
+  const v = await rpc("eth_getStorageAt", [TOKEN, slot, "latest"]);
+  if (!v || BigInt(v) === 0n) return null; // burned (zero) or never existed
+  return BigInt(v).toString();
+}
+
+async function fetchSvg(seed) {
+  if (!seed) return "";
+  try { return decodeString(await call(HOOK, "0x4a7dd523" + pad32(BigInt(seed).toString(16)))); }
+  catch { return ""; }
+}
+
+const $status = document.getElementById("status");
+const $grid = document.getElementById("grid");
+const $counts = document.getElementById("counts");
+const $ranks = document.getElementById("ranks");
+const $modal = document.getElementById("modal");
+const $mArt = document.getElementById("modalArt");
+const $mMeta = document.getElementById("modalMeta");
+
+const items = []; // { jiffId, owner, txHash, blockNumber, seed, level, svg }
+
+function openItem(item) {
+  $mArt.innerHTML = item.svg || "";
+  $mMeta.innerHTML =
+    `<b>JIFF #${item.jiffId}</b> · L${item.level}${item.seed === null ? " · 🔥 BURNED (seed zeroed)" : ""}<br>` +
+    `minted to: <a href="https://etherscan.io/address/${item.owner}" target="_blank" rel="noopener">${item.owner}</a><br>` +
+    `tx: <a href="https://etherscan.io/tx/${item.txHash}" target="_blank" rel="noopener">${item.txHash.slice(0,10)}…</a><br>` +
+    `block: ${item.blockNumber.toLocaleString()}<br>` +
+    (item.seed ? `seed: <span style="font-size:10px">${item.seed}</span><br>` : "");
+  $modal.classList.add("on");
+}
+
+function renderItem(item) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML =
+    `<div class="art">
+       ${item.svg || (item.seed === null ? '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666">🔥 burned</div>' : '')}
+       <span class="lv l${item.level ?? ''}">L${item.level ?? '?'}</span>
+     </div>
+     <div class="meta">
+       <div class="id">#${item.jiffId}</div>
+       <div class="owner">${fmtAddr(item.owner)}</div>
+       <div class="blk">block ${item.blockNumber.toLocaleString()}</div>
+     </div>`;
+  card.addEventListener("click", () => openItem(item));
+  $grid.appendChild(card);
+}
+
+function renderRanks() {
+  // Group by owner; for each: count, levels[]
+  const byOwner = new Map();
+  for (const it of items) {
+    if (!byOwner.has(it.owner)) byOwner.set(it.owner, { count: 0, levels: [0,0,0,0,0] });
+    const r = byOwner.get(it.owner);
+    r.count++;
+    if (it.level !== null && it.level !== undefined) r.levels[it.level]++;
+  }
+  const list = [...byOwner.entries()].map(([owner, r]) => ({ owner, ...r }))
+    .sort((a, b) => (b.levels[4]+b.levels[3]) - (a.levels[4]+a.levels[3]) || b.count - a.count)
+    .slice(0, 40);
+  $ranks.innerHTML = list.map(r => {
+    const suspect = (r.levels[4] >= 3 || (r.levels[3] + r.levels[4] >= 6 && r.count >= 5));
+    return `<div class="rank ${suspect?'suspect':''}">
+      <span><a href="https://etherscan.io/address/${r.owner}" target="_blank" rel="noopener">${fmtAddr(r.owner)}</a></span>
+      <span class="lvbadges">
+        ${r.levels.map((c,i) => c > 0 ? `<span class="l${i}">L${i}:${c}</span>` : '').join('')}
+        <span class="b">${r.count}</span>
+      </span>
+    </div>`;
+  }).join("");
+}
+
+async function pmap(arr, n, fn) {
+  const out = new Array(arr.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, arr.length) }, async () => {
+    while (i < arr.length) {
+      const k = i++;
+      try { out[k] = await fn(arr[k], k); } catch (e) { out[k] = null; }
+    }
+  }));
+  return out;
+}
+
+async function scan(blocksBack) {
+  $grid.innerHTML = "";
+  items.length = 0;
+  $counts.textContent = "";
+  $ranks.innerHTML = "";
+
+  const latestHex = await rpc("eth_blockNumber");
+  const latest = parseInt(latestHex, 16);
+  const startBlock = blocksBack === Infinity ? 21000000 : Math.max(0, latest - blocksBack);
+  $status.textContent = `scanning OnUpegMinted from block ${startBlock.toLocaleString()} → ${latest.toLocaleString()}…`;
+
+  const CHUNK = 500;       // Alchemy free tier max range
+  const PARALLEL = 6;
+  const chunks = [];
+  for (let f = startBlock; f <= latest; f += CHUNK) {
+    chunks.push([f, Math.min(f + CHUNK - 1, latest)]);
+  }
+  let scanned = 0;
+  let next = 0;
+
+  const allLogs = [];
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, chunks.length) }, async () => {
+    while (true) {
+      const k = next++;
+      if (k >= chunks.length) return;
+      const [from, to] = chunks[k];
+      let logs;
+      try {
+        logs = await rpc("eth_getLogs", [{
+          address: TOKEN,
+          fromBlock: "0x" + from.toString(16),
+          toBlock:   "0x" + to.toString(16),
+          topics: [ONUPEGMINTED_TOPIC]
+        }]);
+      } catch (e) {
+        console.warn("getLogs failed:", from, to, e.message);
+        scanned += (to - from + 1);
+        continue;
+      }
+      allLogs.push(...logs);
+      scanned += (to - from + 1);
+      $status.textContent = `scanned ${scanned.toLocaleString()}/${(latest-startBlock+1).toLocaleString()} blocks · ${allLogs.length} mints found`;
+    }
+  }));
+
+  // Sort newest first by block, then by logIndex
+  allLogs.sort((a, b) => {
+    const ba = parseInt(a.blockNumber, 16), bb = parseInt(b.blockNumber, 16);
+    if (ba !== bb) return bb - ba;
+    return parseInt(b.logIndex, 16) - parseInt(a.logIndex, 16);
+  });
+
+  $status.textContent = `decoding ${allLogs.length} mints…`;
+
+  // Decorate with seed + svg in parallel
+  const decorated = await pmap(allLogs, 8, async (log) => {
+    const owner = "0x" + log.topics[1].slice(26);
+    const jiffId = Number(BigInt(log.data.slice(0, 66)));
+    const seed = await readSeed(jiffId);
+    const level = seed === null ? null : levelOf(seed);
+    const svg = seed === null ? "" : await fetchSvg(seed);
+    return {
+      jiffId, owner, seed, level, svg,
+      txHash: log.transactionHash,
+      blockNumber: parseInt(log.blockNumber, 16)
+    };
+  });
+
+  for (const it of decorated) {
+    if (!it) continue;
+    items.push(it);
+    renderItem(it);
+  }
+  $counts.textContent = `${items.length} mints`;
+
+  // Distribution summary
+  const lvlDist = [0,0,0,0,0];
+  let burned = 0;
+  for (const it of items) {
+    if (it.level === null) burned++;
+    else lvlDist[it.level]++;
+  }
+  $status.textContent = `✓ ${items.length} mints in last ${blocksBack === Infinity ? '∞' : blocksBack.toLocaleString()} blocks · L0-4: ${lvlDist.join("/")}${burned ? " · "+burned+" burned" : ""}`;
+  renderRanks();
+}
+
+document.getElementById("rescan").onclick = () => {
+  const v = parseInt(document.getElementById("blockBack").value, 10) || 50400;
+  scan(v).catch(e => $status.textContent = "error: " + e.message);
+};
+document.getElementById("deepScan").onclick = () => {
+  scan(Infinity).catch(e => $status.textContent = "error: " + e.message);
+};
+
+// auto-load
+scan(50400).catch(e => $status.textContent = "error: " + e.message);
+</script>
+</body>
+</html>

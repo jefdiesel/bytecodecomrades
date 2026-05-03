@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — seed predictor</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 11px; margin: 0 0 10px; color: #888; font-weight: 600;
+              text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
+  .row label { color: #888; min-width: 130px; }
+  .row .v { color: #fff; word-break: break-all; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277;
+           padding: 6px 14px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  .preview { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
+  .preview .art { width: 200px; aspect-ratio: 1; image-rendering: pixelated;
+                  background: #0b0c10; border-radius: 4px; }
+  .preview .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; font-size: 11px; }
+  .traits .t { background: #0b0c10; padding: 4px 6px; border-radius: 3px; display: flex; justify-content: space-between; }
+  .traits .t .k { color: #888; }
+  .traits .t .v { color: #fff; font-weight: 600; }
+  .traits .t.zero { opacity: .35; }
+  .badge { display: inline-block; background: #2a3548; color: #ccf; padding: 2px 8px; border-radius: 2px; font-size: 10px; }
+  .badge.l3 { background: #4a3548; color: #fcf; }
+  .badge.l4 { background: #4a4a35; color: #ffc; }
+  .seed-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+  .scell { background: #16181d; border-radius: 3px; overflow: hidden; }
+  .scell .art { aspect-ratio: 1; background: #0b0c10; image-rendering: pixelated; }
+  .scell .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .scell .meta { padding: 4px 6px; font-size: 10px; line-height: 1.4; color: #888; }
+  .scell.l3 .art { box-shadow: inset 0 0 0 2px #f6c; }
+  .scell.l4 .art { box-shadow: inset 0 0 0 2px #fc6; }
+  .gates { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; font-size: 11px; margin-top: 6px; }
+  .gates .g { background: #0b0c10; padding: 6px; border-radius: 3px; text-align: center; }
+  .gates .g .lvl { color: #888; font-size: 10px; }
+  .gates .g .pct { color: #fff; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — seed predictor (read-only)</h1>
+  <div class="sub">
+    No wallet, no swap, no gas. Reads <a href="https://etherscan.io/address/0x4839ed1943afdeb68e898999b311bdf7879c4440" target="_blank" rel="noopener">JIFFHook</a>'s
+    <code>_randomSeed</code> + chain state, simulates the keccak forward, decodes the next mint's level + traits.
+    <br><b>Caveat:</b> the seed for YOUR mint depends on the prevrandao of the block your tx mines in.
+    Unknown until block proposed. This shows what you'd get if your tx landed in the current block right now.
+    <br>← <a href="/jiff">gallery</a> · <a href="/jiff/grind">grinder</a> · <a href="/jiff/clone">clone sniper</a> · <a href="/jiff/minted">recent mints</a>
+  </div>
+</header>
+
+<div class="panel">
+  <h2>chain state</h2>
+  <div class="row"><label>current block</label><span class="v" id="block">—</span></div>
+  <div class="row"><label>block.timestamp</label><span class="v" id="ts">—</span></div>
+  <div class="row"><label>block.prevrandao</label><span class="v" id="pr">—</span></div>
+  <div class="row"><label>hook randomSeed()</label><span class="v" id="seed">—</span></div>
+  <div class="row"><label>hook randomCount</label><span class="v" id="count">—</span></div>
+  <div class="row"><label>level counts (live)</label><span class="v" id="lvlCounts">—</span></div>
+  <div class="row" style="display:block">
+    <label style="display:block;margin-bottom:4px">level gate (bps; rolled left→right, first hit wins, else L4)</label>
+    <div class="gates" id="gates"></div>
+  </div>
+  <div class="row" style="padding-top: 10px"><button id="refresh">refresh</button></div>
+</div>
+
+<div class="panel">
+  <h2>predicted next mint (one swap from now)</h2>
+  <div class="preview">
+    <div class="art" id="nextArt"></div>
+    <div>
+      <div class="row"><label>predicted seed</label><span class="v" id="nextSeed">—</span></div>
+      <div class="row"><label>level</label><span class="v" id="rarity">—</span></div>
+      <div class="traits" id="nextTraits"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>next 24 swaps if all in current block (count+1 .. count+24)</h2>
+  <div class="sub" style="margin-bottom: 10px">
+    Speculative — assumes prevrandao + timestamp + block number stay constant.
+    Useful only for tightly-bunched bundle simulation. Pink outline = L3, yellow = L4.
+  </div>
+  <div class="seed-list" id="future"></div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1";
+const HOOK  = "0x4839ed1943afdeb68e898999b311bdf7879c4440";
+const SEL = {
+  randomSeed:         "0x0b747d91",
+  generate:           "0x4a7dd523",
+  getLevelImageParams:"0x7e6f3268",
+  UpegLevelGateBps:   "0xcb76f79c",
+  UpegsLevelCounts:   "0x8b643f55"
+};
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const r = await fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+
+function pad32(h){ return h.replace(/^0x/,"").toLowerCase().padStart(64,"0"); }
+function callGenerate(seed){ return SEL.generate + pad32(BigInt(seed).toString(16)); }
+function callLevelImageParams(level){ return SEL.getLevelImageParams + pad32(BigInt(level).toString(16)); }
+function callLevelGate(level){ return SEL.UpegLevelGateBps + pad32(BigInt(level).toString(16)); }
+
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  let s = "";
+  for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
+  return s;
+}
+
+function decodeUintArray5(hex) {
+  const data = hex.replace(/^0x/, "");
+  const out = [];
+  for (let i = 0; i < 5; i++) out.push(Number(BigInt("0x" + data.slice(i*64, (i+1)*64))));
+  return out;
+}
+
+// LevelImageParams is a struct of 10 uint8 values, each padded to 32 bytes
+function decodeLevelParams(hex) {
+  const data = hex.replace(/^0x/, "");
+  const slot = i => parseInt(data.slice(i*64, (i+1)*64).slice(-8), 16);
+  return {
+    backgroundColorsCount:        slot(0),
+    backgroundBottomColorsCount:  slot(1),
+    bubbleCount:                  slot(2),
+    bubbleColorsCount:            slot(3),
+    bellCount:                    slot(4),
+    medusaColorsCount:            slot(5),
+    weedCount:                    slot(6),
+    tentacleCount:                slot(7),
+    groundCount:                  slot(8),
+    groundColorsCount:            slot(9)
+  };
+}
+
+let _k = null;
+async function keccak() {
+  if (_k) return _k;
+  const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+  _k = noble.keccak_256;
+  return _k;
+}
+function hexToBytes(h) {
+  h = h.replace(/^0x/, "");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i*2, i*2+2), 16);
+  return out;
+}
+function bytesToHex(b) { return Array.from(b).map(x => x.toString(16).padStart(2,"0")).join(""); }
+
+// Hook computes nextSeed = keccak(abi.encodePacked(++count, prevSeed, ts, prevrandao, blockNum))
+async function nextSeed(prevSeed, prevCount, ts, pr, bn) {
+  const k = await keccak();
+  const newCount = (BigInt(prevCount) + 1n).toString();
+  const vals = [newCount, prevSeed, ts.toString(), BigInt(pr).toString(), bn.toString()];
+  const packed = new Uint8Array(32 * 5);
+  for (let i = 0; i < 5; i++) {
+    const h = BigInt(vals[i]).toString(16).padStart(64, "0");
+    packed.set(hexToBytes(h), i * 32);
+  }
+  return BigInt("0x" + bytesToHex(k(packed))).toString();
+}
+
+// Find _randomCount in JIFFHook storage
+async function findRandomCount(currentSeed) {
+  const target = BigInt(currentSeed);
+  // _randomSeed is a uint256 var; storage layout depends on inheritance.
+  // Probe slots 0..40 to find a value matching randomSeed().
+  for (let slot = 0; slot < 64; slot++) {
+    const slotHex = "0x" + slot.toString(16).padStart(64, "0");
+    let v;
+    try { v = await rpc("eth_getStorageAt", [HOOK, slotHex, "latest"]); }
+    catch { continue; }
+    if (v && BigInt(v) === target) {
+      const next = "0x" + (slot+1).toString(16).padStart(64, "0");
+      const cv = await rpc("eth_getStorageAt", [HOOK, next, "latest"]);
+      return { count: BigInt(cv).toString(), seedSlot: slot };
+    }
+  }
+  return null;
+}
+
+async function fetchSvg(seed) {
+  try { return decodeString(await rpc("eth_call", [{ to: HOOK, data: callGenerate(seed) }, "latest"])); }
+  catch { return ""; }
+}
+
+const $ = id => document.getElementById(id);
+
+// ------- simulator: _chooseLevel + _nextJIFFMetadata -------
+// Mirrors JIFF.sol exactly. Uses the same Random.next() = keccak(seed, ++nonce).
+async function simulateMint(randomSeed, levelGates, levelParams) {
+  const k = await keccak();
+  let nonce = 0n;
+  function next() {
+    nonce += 1n;
+    const buf = new Uint8Array(64);
+    const seedHex  = BigInt(randomSeed).toString(16).padStart(64, "0");
+    const nonceHex = nonce.toString(16).padStart(64, "0");
+    buf.set(hexToBytes(seedHex),  0);
+    buf.set(hexToBytes(nonceHex), 32);
+    return BigInt("0x" + bytesToHex(k(buf)));
+  }
+  const chance    = (prob)  => (next() % 100n) < BigInt(prob);
+  const pickId    = (count) => count === 0 ? 0 : Number(next() % BigInt(count)) + 1;
+  const pickColor = (max)   => max === 0 ? 0 : Number(next() % BigInt(max));
+
+  // _chooseLevel: levels 0..3, first that passes wins; else 4
+  let level = 4;
+  for (let lv = 0; lv < 4; lv++) {
+    if ((next() % 10000n) < BigInt(levelGates[lv])) { level = lv; break; }
+  }
+  const p = levelParams[level];
+
+  // _nextJIFFMetadata
+  const t = {
+    background: 0, backgroundBottom: 0, bubble: 0, weed: 0,
+    mirrorTime: 0, bobTime: 0, tentacle: 0, bell: 0, ground: 0,
+    bellColor: 0, weedColor: 0, groundColor: 0, bubbleColor: 0, tentacleColor: 0
+  };
+  t.background = pickColor(p.backgroundColorsCount);
+  if (level === 4) t.backgroundBottom = pickColor(p.backgroundBottomColorsCount);
+  t.ground = p.groundCount === 0 ? 0 : pickId(p.groundCount);
+  if (t.ground > 0) t.groundColor = pickColor(p.groundColorsCount);
+  t.bubble = chance(75) ? pickId(p.bubbleCount) : 0;
+  if (t.bubble > 0) t.bubbleColor = pickColor(p.bubbleColorsCount);
+  t.weed = (level < 4 && chance(75)) ? pickId(p.weedCount) : 0;
+  if (t.weed > 0) t.weedColor = pickColor(p.medusaColorsCount);
+  t.tentacle      = pickColor(p.tentacleCount);
+  t.tentacleColor = pickColor(p.medusaColorsCount);
+  t.bell          = pickColor(p.bellCount);
+  t.bellColor     = pickColor(p.medusaColorsCount);
+  t.mirrorTime = Number(3n + (next() % 5n));
+  t.bobTime    = level < 2 ? 0 : Number(7n + (next() % 3n));
+
+  return { level, traits: t };
+}
+
+// pack to seed uint256 — JIFFMetadataLibrary.encode + level<<112
+function packSeed(t, level) {
+  let s = 0n;
+  const put = (v, sh) => s |= BigInt(v) << BigInt(sh);
+  put(t.background, 0);
+  put(t.backgroundBottom, 8);
+  put(t.bubble, 16);
+  put(t.weed, 24);
+  put(t.mirrorTime, 32);
+  put(t.bobTime, 40);
+  put(t.tentacle, 48);
+  put(t.bell, 56);
+  put(t.ground, 64);
+  put(t.bellColor, 72);
+  put(t.weedColor, 80);
+  put(t.groundColor, 88);
+  put(t.bubbleColor, 96);
+  put(t.tentacleColor, 104);
+  put(level, 112);
+  return s.toString();
+}
+
+function levelBadge(lvl) {
+  const labels = ["L0 common","L1","L2","L3 RARE","L4 RAREST"];
+  const cls = lvl===4 ? "l4" : (lvl===3 ? "l3" : "");
+  return `<span class="badge ${cls}">${labels[lvl]}</span>`;
+}
+
+function renderTraits(t, container) {
+  const fields = [
+    ["background", t.background],
+    ["bgBottom", t.backgroundBottom],
+    ["ground", t.ground], ["ground_color", t.groundColor],
+    ["bubble", t.bubble], ["bubble_color", t.bubbleColor],
+    ["weed", t.weed], ["weed_color", t.weedColor],
+    ["tentacle", t.tentacle], ["tentacle_color", t.tentacleColor],
+    ["bell", t.bell], ["bell_color", t.bellColor],
+    ["mirrorTime", t.mirrorTime], ["bobTime", t.bobTime],
+  ];
+  container.innerHTML = fields.map(([k, v]) =>
+    `<div class="t${v === 0 ? ' zero' : ''}"><span class="k">${k}</span><span class="v">${v}</span></div>`
+  ).join("");
+}
+
+let cachedLevelParams = null, cachedGates = null;
+async function getLevelParams() {
+  if (cachedLevelParams) return cachedLevelParams;
+  const out = [];
+  for (let lv = 0; lv < 5; lv++) {
+    const raw = await rpc("eth_call", [{ to: HOOK, data: callLevelImageParams(lv) }, "latest"]);
+    out.push(decodeLevelParams(raw));
+  }
+  cachedLevelParams = out;
+  return out;
+}
+async function getGates() {
+  // gates change as level counts shift, so don't cache forever — re-read each refresh
+  const out = [];
+  for (let lv = 0; lv < 4; lv++) {
+    const raw = await rpc("eth_call", [{ to: TOKEN, data: callLevelGate(lv) }, "latest"]);
+    out.push(Number(BigInt(raw)));
+  }
+  return out;
+}
+
+async function refresh() {
+  $("block").textContent = "loading...";
+  try {
+    const [levelParams, gates, lvlCountsRaw] = await Promise.all([
+      getLevelParams(), getGates(),
+      rpc("eth_call", [{ to: TOKEN, data: SEL.UpegsLevelCounts }, "latest"])
+    ]);
+    cachedGates = gates;
+    const lvlCounts = decodeUintArray5(lvlCountsRaw);
+
+    const blk = await rpc("eth_getBlockByNumber", ["latest", false]);
+    const bn = parseInt(blk.number, 16);
+    const ts = parseInt(blk.timestamp, 16);
+    const pr = blk.mixHash || blk.prevRandao || "0x0";
+    $("block").textContent = bn.toLocaleString();
+    $("ts").textContent = ts + " (" + new Date(ts*1000).toLocaleString() + ")";
+    $("pr").textContent = pr;
+    $("lvlCounts").textContent = lvlCounts.map((c,i)=>`L${i}: ${c}`).join(" · ");
+
+    // gate display: L0..L3 from chain; L4 = remainder
+    let cum = 0;
+    const probs = [];
+    for (let lv = 0; lv < 4; lv++) {
+      const p = (10000 - cum * 100) === 0 ? 0 : (1 - cum/100) * (gates[lv]/10000);
+      probs.push((1 - cum/100) * (gates[lv]/10000));
+      cum += probs[lv] * 100;
+    }
+    probs.push(Math.max(0, 1 - cum/100));
+    $("gates").innerHTML = [0,1,2,3,4].map(lv => {
+      const g = lv < 4 ? gates[lv] : "—";
+      const pct = (probs[lv]*100).toFixed(2);
+      return `<div class="g"><div class="lvl">L${lv} gate</div><div class="pct">${g === "—" ? "rest" : g+" bps"}</div><div style="color:#aaa;margin-top:2px">≈ ${pct}%</div></div>`;
+    }).join("");
+
+    const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
+    const currentSeed = BigInt(seedHex).toString();
+    $("seed").textContent = currentSeed;
+
+    const cd = await findRandomCount(currentSeed);
+    const count = cd ? cd.count : "0";
+    $("count").textContent = cd ? `${count} (slot ${cd.seedSlot+1})` : "couldn't find slot — using 0";
+
+    // Step 1: compute next _randomSeed (after a swap fires _randomizeSeed in afterSwap)
+    const nextRandSeed = await nextSeed(currentSeed, count, ts, pr, bn);
+    // Step 2: simulate the mint at that seed
+    const { level, traits } = await simulateMint(nextRandSeed, gates, levelParams);
+    const packed = packSeed(traits, level);
+    $("nextSeed").textContent = packed + "  (rand: " + nextRandSeed.slice(0,18) + "…)";
+    $("rarity").innerHTML = levelBadge(level);
+    renderTraits(traits, $("nextTraits"));
+    $("nextArt").innerHTML = await fetchSvg(packed);
+
+    // Future 24 swaps
+    $("future").innerHTML = "loading 24 candidates...";
+    let s = currentSeed, c = BigInt(count);
+    const cells = [];
+    for (let i = 1; i <= 24; i++) {
+      s = await nextSeed(s, c.toString(), ts, pr, bn);
+      c += 1n;
+      const sim = await simulateMint(s, gates, levelParams);
+      cells.push({ seed: packSeed(sim.traits, sim.level), idx: i, level: sim.level });
+    }
+    await Promise.all(cells.map(async cell => { cell.svg = await fetchSvg(cell.seed); }));
+    $("future").innerHTML = cells.map(cell => {
+      const cls = cell.level === 4 ? "l4" : (cell.level === 3 ? "l3" : "");
+      return `<div class="scell ${cls}" title="seed ${cell.seed}">
+        <div class="art">${cell.svg}</div>
+        <div class="meta">+${cell.idx} · L${cell.level}</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    $("block").textContent = "error: " + e.message;
+    console.error(e);
+  }
+}
+
+$("refresh").onclick = refresh;
+refresh();
+</script>
+</body>
+</html>

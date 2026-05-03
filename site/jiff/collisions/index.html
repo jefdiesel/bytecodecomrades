@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — seed collision scan</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .stats { display: flex; gap: 24px; font-size: 13px; flex-wrap: wrap; }
+  .stats .v { color: #fff; font-weight: 600; font-size: 16px; }
+  .stats .k { color: #888; font-size: 11px; display: block; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277;
+           padding: 5px 10px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  .group { background: #16181d; border-radius: 4px; padding: 12px; margin-bottom: 8px; }
+  .group .head { font-size: 12px; color: #888; margin-bottom: 8px; }
+  .group .head .count { color: #f6c; font-weight: 600; font-size: 14px; }
+  .group .seed { font-size: 10px; color: #555; word-break: break-all; }
+  .members { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 4px; }
+  .cell { aspect-ratio: 1; background: #0b0c10; border-radius: 2px; position: relative; overflow: hidden; }
+  .cell svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .cell .id { position: absolute; bottom: 1px; right: 2px; background: #000c; color: #fff; padding: 0 3px; font-size: 9px; }
+  .cell .lv { position: absolute; top: 1px; left: 2px; background: #000c; color: #fff; padding: 0 3px; font-size: 9px; }
+  .cell .lv.l4 { background: #ffc; color: #000; }
+  .cell .lv.l3 { background: #fcf; color: #000; }
+  #status { color: #8a8f99; font-size: 12px; }
+  .empty { color: #666; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — seed collision scan</h1>
+  <div class="sub">
+    Reads cached jiffs from your local <code>jiff-archive</code> IndexedDB
+    (populated by <a href="/jiff">/jiff</a> as you scroll), groups by seed,
+    surfaces collisions. Two mints with the same seed = identical JIFF — happens when
+    the hook's <code>_randomSeed</code> didn't churn between mints (e.g. LP <code>removeLiquidity</code>
+    fires <code>_afterTokenTransfer</code> but NOT <code>afterSwap</code>, so <code>_randomizeSeed</code>
+    never runs and the next mint reuses the stale seed).
+    <br>← <a href="/jiff">gallery</a> · <a href="/jiff/grind">grinder</a> · <a href="/jiff/predict">predictor</a> · <a href="/jiff/clone">clone sniper</a>
+  </div>
+</header>
+
+<div class="panel">
+  <div class="stats">
+    <div><span class="k">scanned</span><span class="v" id="scanned">—</span></div>
+    <div><span class="k">unique seeds</span><span class="v" id="unique">—</span></div>
+    <div><span class="k">collision groups</span><span class="v" id="collisions">—</span></div>
+    <div><span class="k">cloned ids</span><span class="v" id="cloned">—</span></div>
+    <div><span class="k">collision rate</span><span class="v" id="rate">—</span></div>
+  </div>
+  <div style="margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+    <button id="rescan">re-read cache</button>
+    <input id="lookupId" type="number" placeholder="check id (e.g. 1234)" min="1" style="background:#0b0c10;color:#e8e8e8;border:1px solid #2a2e36;padding:5px 10px;border-radius:3px;font:inherit;width:200px">
+    <button id="lookupGo">check id for clones</button>
+    <button id="showAll" style="background:transparent;color:#888;border:none;text-decoration:underline">show all groups</button>
+    <span id="status" style="margin-left: 8px"></span>
+  </div>
+</div>
+
+<div id="groups"></div>
+
+<script>
+"use strict";
+
+const DB_NAME = "jiff-archive";
+const STORE = "jiffs";
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: "id" });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function dbGetAll(db) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readonly");
+    const r = tx.objectStore(STORE).getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+function levelOf(seedStr) { return Number((BigInt(seedStr) >> 112n) & 0xFFn); }
+
+const $ = id => document.getElementById(id);
+
+async function scan() {
+  $("status").textContent = "loading cache…";
+  let db, items;
+  try {
+    db = await openDB();
+    items = await dbGetAll(db);
+  } catch (e) {
+    $("status").textContent = "IndexedDB unavailable: " + e.message;
+    return;
+  }
+  if (!items || items.length === 0) {
+    $("status").innerHTML = `cache is empty. open <a href="/jiff">/jiff</a> first and let it scan a few hundred holders, then come back.`;
+    return;
+  }
+
+  const bySeed = new Map();
+  for (const it of items) {
+    if (!it.seed) continue;
+    const key = String(it.seed);
+    if (!bySeed.has(key)) bySeed.set(key, []);
+    bySeed.get(key).push(it);
+  }
+
+  const total = items.length;
+  const unique = bySeed.size;
+  const collisionGroups = [...bySeed.values()].filter(g => g.length > 1);
+  const cloned = collisionGroups.reduce((sum, g) => sum + g.length, 0);
+  const rate = total > 0 ? (cloned / total * 100).toFixed(2) + "%" : "—";
+
+  $("scanned").textContent = total.toLocaleString();
+  $("unique").textContent = unique.toLocaleString();
+  $("collisions").textContent = collisionGroups.length.toLocaleString();
+  $("cloned").textContent = cloned.toLocaleString();
+  $("rate").textContent = rate;
+  $("status").textContent = `scanned ${total.toLocaleString()} cached jiffs`;
+
+  collisionGroups.sort((a, b) => b.length - a.length);
+  const $groups = $("groups");
+  const TOP = 100;
+  $groups.innerHTML = collisionGroups.slice(0, TOP).map(group => {
+    const ids = group.map(g => g.id).sort((a, b) => a - b);
+    const idRange = ids.length > 6
+      ? `${ids[0]}, ${ids[1]}, ${ids[2]}, … (${ids.length-3} more), ${ids.at(-1)}`
+      : ids.join(", ");
+    const allConsecutive = ids.every((id, i) => i === 0 || id === ids[i-1] + 1);
+    const flag = allConsecutive ? `<span style="color:#f6c">CONSECUTIVE</span>` : "";
+    const lvl = levelOf(group[0].seed);
+    return `
+      <div class="group">
+        <div class="head">
+          <span class="count">${group.length}× clone</span> · L${lvl} ${flag}
+          · ids: ${idRange}
+        </div>
+        <div class="members">
+          ${group.slice(0, 12).map(g =>
+            `<div class="cell" title="#${g.id} L${lvl} owner ${g.holder}">${g.svg || ""}<span class="lv l${lvl}">L${lvl}</span><span class="id">#${g.id}</span></div>`
+          ).join("")}
+        </div>
+        <div class="seed">seed: ${group[0].seed}</div>
+      </div>
+    `;
+  }).join("");
+
+  if (collisionGroups.length > TOP) {
+    $groups.insertAdjacentHTML("beforeend",
+      `<div style="text-align:center;color:#666;padding:20px">… and ${collisionGroups.length - TOP} more collision groups (showing top ${TOP})</div>`);
+  }
+  if (collisionGroups.length === 0) {
+    $groups.innerHTML = `<div class="empty">no collisions found in cache. either your scan is small or the bug isn't being exploited (yet).</div>`;
+  }
+}
+
+document.getElementById("rescan").onclick = () => { scan(); };
+
+let lastItems = null;
+let lastBySeed = null;
+
+async function ensureLoaded() {
+  if (!lastItems) {
+    const db = await openDB();
+    lastItems = await dbGetAll(db);
+    lastBySeed = new Map();
+    for (const it of lastItems) {
+      if (!it.seed) continue;
+      const k = String(it.seed);
+      if (!lastBySeed.has(k)) lastBySeed.set(k, []);
+      lastBySeed.get(k).push(it);
+    }
+  }
+}
+
+async function lookupId(id) {
+  await ensureLoaded();
+  const target = lastItems.find(it => Number(it.id) === id);
+  const $groups = $("groups");
+  if (!target) {
+    $groups.innerHTML = `<div class="empty">JIFF #${id} not in your cache. Open <a href="/jiff">/jiff</a> and find it (use the "find by id" search) so it gets cached, then come back.</div>`;
+    return;
+  }
+  const group = lastBySeed.get(String(target.seed));
+  const lvl = levelOf(target.seed);
+  if (!group || group.length < 2) {
+    $groups.innerHTML = `
+      <div class="group">
+        <div class="head"><span style="color:#6f6">✓ NO CLONES (in cached scan)</span> · JIFF #${id} (L${lvl}) appears unique among ${lastItems.length} cached.</div>
+        <div class="members" style="grid-template-columns:160px;">
+          <div class="cell" style="aspect-ratio:1;width:160px;">${target.svg || ""}<span class="lv l${lvl}">L${lvl}</span><span class="id">#${id}</span></div>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:6px">Caveat: cache covers ${lastItems.length} of all ever minted. A clone could exist in the unscanned portion. Scroll more on /jiff to widen the sample.</div>
+        <div class="seed">seed: ${target.seed}</div>
+      </div>
+    `;
+    return;
+  }
+  const ids = group.map(g => g.id).sort((a, b) => a - b);
+  const allConsecutive = ids.every((x, i) => i === 0 || x === ids[i-1] + 1);
+  const flag = allConsecutive ? `<span style="color:#f6c">CONSECUTIVE</span>` : "";
+  $groups.innerHTML = `
+    <div class="group">
+      <div class="head">
+        <span class="count">⚠ JIFF #${id} HAS ${group.length-1} CLONE${group.length-1===1?'':'S'}</span> · L${lvl} ${flag}
+        · all ids: ${ids.join(", ")}
+      </div>
+      <div class="members">
+        ${group.map(g =>
+          `<div class="cell" title="#${g.id} owner ${g.holder}" style="${g.id===id?'box-shadow:0 0 0 2px #f60;':''}">${g.svg || ""}<span class="lv l${lvl}">L${lvl}</span><span class="id">#${g.id}</span></div>`
+        ).join("")}
+      </div>
+      <div class="seed">seed: ${target.seed}</div>
+      <div style="font-size:11px;color:#888;margin-top:6px">${id} is highlighted in orange. The other ids share its exact seed = identical JIFF = its rarity is diluted by ${group.length-1}x.</div>
+    </div>
+  `;
+}
+
+document.getElementById("lookupGo").onclick = () => {
+  const v = document.getElementById("lookupId").value.trim();
+  const id = parseInt(v, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    $("status").textContent = "enter a positive integer id";
+    return;
+  }
+  lookupId(id);
+};
+document.getElementById("lookupId").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("lookupGo").click();
+});
+document.getElementById("showAll").onclick = () => { scan(); };
+
+scan();
+</script>
+</body>
+</html>

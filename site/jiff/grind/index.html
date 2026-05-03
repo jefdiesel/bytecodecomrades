@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — seed grinder</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.5; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  .cols { display: grid; grid-template-columns: 320px 1fr; gap: 24px; margin-top: 16px; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; }
+  .panel h2 { font-size: 12px; margin: 0 0 10px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .row label { color: #ccc; cursor: pointer; user-select: none; }
+  .row input[type=checkbox] { accent-color: #6cf; }
+  .row input[type=number], .row select { background: #0b0c10; color: #e8e8e8; border: 1px solid #2a2e36; padding: 3px 6px; border-radius: 3px; width: 80px; font: inherit; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277; padding: 8px 14px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  #log { font-size: 11px; line-height: 1.6; color: #888; max-height: 240px; overflow-y: auto; padding: 8px; background: #0b0c10; border-radius: 3px; margin-top: 10px; }
+  #log .ok { color: #6f6; }
+  #log .miss { color: #f66; }
+  #log .info { color: #888; }
+  #recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+  .card { aspect-ratio: 1; background: #16181d; border-radius: 3px; position: relative; overflow: hidden; }
+  .card svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .card .tag { position: absolute; bottom: 2px; right: 4px; background: #000c; color: #fff; padding: 1px 4px; font-size: 9px; border-radius: 2px; }
+  .card .lv { position: absolute; top: 2px; left: 4px; background: #000c; color: #fff; padding: 0 4px; font-size: 9px; border-radius: 2px; }
+  .card .lv.l4 { background: #ffc; color: #000; }
+  .card .lv.l3 { background: #fcf; color: #000; }
+  .card.match { box-shadow: 0 0 0 2px #6f6; }
+  .stat { display: flex; gap: 16px; font-size: 12px; padding: 6px 0; color: #888; flex-wrap: wrap; }
+  .stat .v { color: #fff; font-weight: 600; }
+  .pill { display: inline-block; background: #2a3548; color: #ccf; padding: 2px 6px; border-radius: 2px; font-size: 10px; }
+  details { margin-top: 8px; font-size: 11px; }
+  details summary { color: #888; cursor: pointer; }
+  details ol { margin: 6px 0 0 0; padding-left: 16px; line-height: 1.7; color: #ccc; }
+  details code { background: #0b0c10; padding: 1px 4px; border-radius: 2px; color: #6cf; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — seed grinder</h1>
+  <div class="sub">
+    Exploits the deterministic seed in <a href="https://etherscan.io/address/0x4839ed1943afdeb68e898999b311bdf7879c4440" target="_blank" rel="noopener">JIFFHook</a>'s <code>_randomSeed</code> (keccak of mostly-public inputs).
+    Each pool→user transfer mints a JIFF with a level (0=common…4=rarest); this watches your wallet, decodes new mints, tells you keep or sell back.
+    <br><span class="pill">v0</span> manual mode — you swap, this watches.
+    <br>← <a href="/jiff">gallery</a>
+  </div>
+</header>
+
+<div class="cols">
+  <div class="panel">
+    <h2>rarity gate</h2>
+    <div class="row"><label>min level</label>
+      <select id="minLevel">
+        <option value="0">L0+ (any)</option>
+        <option value="1">L1+</option>
+        <option value="2">L2+</option>
+        <option value="3" selected>L3+ (rare)</option>
+        <option value="4">L4 only (rarest)</option>
+      </select>
+    </div>
+    <div class="row"><label><input type="checkbox" id="reqGround"> require ground</label></div>
+    <div class="row"><label><input type="checkbox" id="reqWeed"> require weed</label></div>
+    <div class="row"><label><input type="checkbox" id="reqBubble"> require bubble</label></div>
+
+    <h2 style="margin-top: 16px">grinder</h2>
+    <div class="row" style="display:block">
+      <button id="connect">connect wallet</button>
+    </div>
+    <div class="row" style="display:block;margin-top:6px">
+      <button id="watchToggle" disabled>start watching</button>
+    </div>
+
+    <details>
+      <summary>how to grind</summary>
+      <ol>
+        <li>pick min level above (L3+ recommended)</li>
+        <li>connect wallet → click <code>start watching</code></li>
+        <li>buy 1+ JIFF on the pool</li>
+        <li>this page shows the resulting JIFF + level within ~6s</li>
+        <li>if it matches → <span class="ok">keep</span>. if not → sell back (burns it, refunds most ETH)</li>
+      </ol>
+    </details>
+  </div>
+
+  <div class="panel">
+    <h2>stats</h2>
+    <div class="stat">
+      <span>connected: <span class="v" id="addr">—</span></span>
+      <span>balance: <span class="v" id="bal">—</span></span>
+      <span>jiffs: <span class="v" id="ucount">—</span></span>
+    </div>
+    <div class="stat">
+      <span>seen this session: <span class="v" id="seen">0</span></span>
+      <span>matches: <span class="v" id="matches">0</span></span>
+      <span>misses: <span class="v" id="misses">0</span></span>
+      <span>est. odds: <span class="v" id="odds">—</span></span>
+    </div>
+
+    <h2 style="margin-top: 14px">last 12 mints</h2>
+    <div id="recent"></div>
+
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1";
+const HOOK  = "0x4839ed1943afdeb68e898999b311bdf7879c4440";
+
+const SEL = {
+  OwnerUpegsCount: "0x067b2601",
+  OwnerUpegsPage:  "0x407d4fb4",
+  generate:        "0x4a7dd523"
+};
+
+function pad32(h){return h.replace(/^0x/,"").toLowerCase().padStart(64,"0");}
+function uintHex(n){return pad32(BigInt(n).toString(16));}
+function addrHex(a){return pad32(a.replace(/^0x/,"").toLowerCase());}
+function callOwnerUpegsPage(a,p,s){return SEL.OwnerUpegsPage + addrHex(a) + uintHex(p) + uintHex(s);}
+function callGenerate(seed){return SEL.generate + pad32(BigInt(seed).toString(16));}
+
+let rpcId = 0;
+async function rpc(method, params){
+  const r = await fetch(RPC,{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:++rpcId,method,params})});
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+async function call(to,data){return rpc("eth_call",[{to,data},"latest"]);}
+
+function decodeUint(hex){return BigInt(hex);}
+function decodeOwnerUpegsPage(hex){
+  const data = hex.replace(/^0x/,"");
+  if (data.length < 128) return [];
+  const len = parseInt(data.slice(64,128), 16);
+  const out = [];
+  for (let i = 0; i < len; i++){
+    const base = 128 + i*128;
+    out.push({
+      id: Number(BigInt("0x" + data.slice(base, base+64))),
+      seed: BigInt("0x" + data.slice(base+64, base+128)).toString()
+    });
+  }
+  return out;
+}
+function decodeString(hex){
+  const data = hex.replace(/^0x/,"");
+  const len = parseInt(data.slice(64,128), 16);
+  const utf8 = data.slice(128, 128+len*2);
+  let s = "";
+  for (let i = 0; i < utf8.length; i += 2) s += String.fromCharCode(parseInt(utf8.slice(i,i+2),16));
+  return s;
+}
+
+// JIFF seed bit layout — see JIFFMetadata.sol
+function decodeTraits(seedStr){
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background:        b(0),
+    backgroundBottom:  b(1),
+    bubble:            b(2),
+    weed:              b(3),
+    mirrorTime:        b(4),
+    bobTime:           b(5),
+    tentacle:          b(6),
+    bell:              b(7),
+    ground:            b(8),
+    bellColor:         b(9),
+    weedColor:         b(10),
+    groundColor:       b(11),
+    bubbleColor:       b(12),
+    tentacleColor:     b(13),
+    level:             b(14)
+  };
+}
+
+function getCriteria(){
+  return {
+    minLevel: parseInt(document.getElementById("minLevel").value, 10),
+    ground: document.getElementById("reqGround").checked,
+    weed:   document.getElementById("reqWeed").checked,
+    bubble: document.getElementById("reqBubble").checked
+  };
+}
+function matches(t, c){
+  if (t.level < c.minLevel) return false;
+  if (c.ground && !t.ground) return false;
+  if (c.weed   && !t.weed) return false;
+  if (c.bubble && !t.bubble) return false;
+  return true;
+}
+
+const announcedWallets = [];
+window.addEventListener("eip6963:announceProvider", e => announcedWallets.push(e.detail));
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+let wallet = null, account = null;
+async function connectWallet(){
+  const candidates = [];
+  for (const w of announcedWallets) candidates.push({provider: w.provider, name: w.info?.name || "Wallet"});
+  if (Array.isArray(window.ethereum?.providers)) {
+    for (const p of window.ethereum.providers) candidates.push({provider: p, name: providerName(p)});
+  } else if (window.ethereum) {
+    candidates.push({provider: window.ethereum, name: providerName(window.ethereum)});
+  }
+  if (window.phantom?.ethereum) candidates.push({provider: window.phantom.ethereum, name: "Phantom (direct)"});
+  const seen = new Set(); const uniq = [];
+  for (const c of candidates) if (!seen.has(c.provider)) { seen.add(c.provider); uniq.push(c); }
+  uniq.sort((a,b) => (a.provider.isPhantom?1:0) - (b.provider.isPhantom?1:0));
+  for (const c of uniq) {
+    try {
+      const accs = await c.provider.request({method:"eth_requestAccounts"});
+      if (accs?.length) { wallet = c.provider; account = accs[0]; return c.name; }
+    } catch (e) { console.warn("[grind]", c.name, "refused:", e.message); }
+  }
+  throw new Error("no wallet connected");
+}
+function providerName(p){
+  if (p.isMetaMask) return "MetaMask";
+  if (p.isRabby) return "Rabby";
+  if (p.isRainbow) return "Rainbow";
+  if (p.isCoinbaseWallet) return "Coinbase";
+  if (p.isPhantom) return "Phantom";
+  return "Wallet";
+}
+
+let watching = false;
+let knownIds = new Set();
+let stats = { seen: 0, matches: 0, misses: 0 };
+const recentList = [];
+
+const $log = document.getElementById("log");
+function log(msg, klass) {
+  const t = new Date().toTimeString().slice(0,8);
+  $log.insertAdjacentHTML("afterbegin", `<div class="${klass||'info'}">[${t}] ${msg}</div>`);
+}
+
+const $recent = document.getElementById("recent");
+function pushRecent(item, isMatch) {
+  recentList.unshift({ ...item, isMatch });
+  while (recentList.length > 12) recentList.pop();
+  $recent.innerHTML = recentList.map(r =>
+    `<div class="card${r.isMatch?' match':''}" title="#${r.id} L${r.level} · ${r.isMatch?'MATCH':'miss'}">
+       ${r.svg||''}<span class="lv l${r.level}">L${r.level}</span><span class="tag">#${r.id}</span>
+     </div>`
+  ).join("");
+}
+
+async function snapshotAndDecorate(){
+  if (!account) return;
+  const countHex = await call(TOKEN, "0x067b2601" + addrHex(account));
+  const count = Number(decodeUint(countHex));
+  document.getElementById("ucount").textContent = count;
+
+  const start = Math.max(0, count - 100);
+  const pageNum = Math.floor(start / 100);
+  const pageRaw = await call(TOKEN, callOwnerUpegsPage(account, pageNum, 100));
+  return decodeOwnerUpegsPage(pageRaw);
+}
+
+async function watchTick(){
+  try {
+    const page = await snapshotAndDecorate();
+    if (!page) return;
+    const c = getCriteria();
+    for (const u of page) {
+      if (knownIds.has(u.id)) continue;
+      knownIds.add(u.id);
+      let svg = "";
+      try { svg = decodeString(await call(HOOK, callGenerate(u.seed))); } catch {}
+      const t = decodeTraits(u.seed);
+      const isMatch = matches(t, c);
+      stats.seen++;
+      if (isMatch) stats.matches++; else stats.misses++;
+      const presentTraits = ["ground","weed","bubble","tentacle","bell"].filter(k => t[k] > 0).join(",") || "—";
+      log(`JIFF #${u.id} <span class="${isMatch?'ok':'miss'}">${isMatch?'✓ MATCH':'miss'}</span> · L${t.level} · ${presentTraits}`, isMatch?"ok":"miss");
+      pushRecent({id: u.id, seed: u.seed, svg, level: t.level}, isMatch);
+    }
+    document.getElementById("seen").textContent = stats.seen;
+    document.getElementById("matches").textContent = stats.matches;
+    document.getElementById("misses").textContent = stats.misses;
+    document.getElementById("odds").textContent = stats.seen > 0 ? `1 in ~${Math.round(stats.seen / Math.max(1, stats.matches))}` : "—";
+  } catch (e) {
+    log(`tick error: ${e.message}`, "miss");
+  }
+}
+
+let watchInterval = null;
+document.getElementById("watchToggle").onclick = async () => {
+  if (!account) { log("connect wallet first", "miss"); return; }
+  watching = !watching;
+  document.getElementById("watchToggle").textContent = watching ? "stop watching" : "start watching";
+  if (watching) {
+    knownIds = new Set();
+    const current = await snapshotAndDecorate();
+    if (current) for (const u of current) knownIds.add(u.id);
+    log(`watching ${account.slice(0,6)}…${account.slice(-4)} for new mints (poll every 6s)`, "ok");
+    watchInterval = setInterval(watchTick, 6000);
+  } else {
+    if (watchInterval) clearInterval(watchInterval);
+    log("stopped watching", "info");
+  }
+};
+
+document.getElementById("connect").onclick = async () => {
+  try {
+    const name = await connectWallet();
+    document.getElementById("addr").textContent = `${account.slice(0,6)}…${account.slice(-4)} (${name})`;
+    document.getElementById("watchToggle").disabled = false;
+    document.getElementById("connect").textContent = "✓ connected";
+    const balHex = await rpc("eth_getBalance", [account, "latest"]);
+    const bal = Number(BigInt(balHex)) / 1e18;
+    document.getElementById("bal").textContent = bal.toFixed(4) + " ETH";
+    await snapshotAndDecorate();
+    log(`connected via ${name}`, "ok");
+  } catch (e) {
+    log("connect failed: " + e.message, "miss");
+  }
+};
+</script>
+</body>
+</html>

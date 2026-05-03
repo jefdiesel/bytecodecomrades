@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — every jiff (live + archive)</title>
+<meta name="description" content="Live + cached gallery of every JIFF ever seen. Burned jiffs survive in your local archive.">
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  #status { color: #8a8f99; font-size: 12px; margin: 0 0 12px; min-height: 16px; word-break: break-all; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px;
+             font-size: 12px; align-items: center; }
+  .toolbar button, .toolbar input { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
+                    padding: 5px 10px; border-radius: 3px; cursor: pointer;
+                    font: inherit; }
+  .toolbar input { cursor: text; min-width: 380px; }
+  .toolbar button:hover { background: #262a32; }
+  .toolbar button.on { background: #2a3548; border-color: #3d5277; }
+  .toolbar .pill { color: #8a8f99; padding: 5px 8px; }
+  .levelbar { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11px; margin: 0 0 12px; }
+  .levelbar .lv { padding: 4px 9px; border-radius: 3px; background: #16181d; cursor: pointer; }
+  .levelbar .lv.on { background: #2a3548; border: 1px solid #3d5277; }
+  .levelbar .lv .c { color: #fff; font-weight: 600; }
+  .levelbar .lv.l4 { background: #4a4a35; color: #ffc; }
+  .levelbar .lv.l3 { background: #4a3548; color: #fcf; }
+  .walletbar { display: flex; gap: 8px; margin: 0 0 16px; align-items: center; flex-wrap: wrap; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+          gap: 6px; }
+  .cell { aspect-ratio: 1; background: #16181d; border-radius: 3px;
+          position: relative; overflow: hidden; cursor: pointer; }
+  .cell svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .cell .tag { position: absolute; bottom: 2px; right: 4px; font-size: 9px;
+               color: #fff; opacity: .55; mix-blend-mode: difference; pointer-events: none; }
+  .cell .lv { position: absolute; top: 2px; right: 4px; font-size: 8px; padding: 0 3px;
+              background: #000c; color: #fff; border-radius: 2px; }
+  .cell .lv.l4 { background: #ffc; color: #000; }
+  .cell .lv.l3 { background: #fcf; color: #000; }
+  .cell.burned svg { opacity: .35; filter: grayscale(.7); }
+  .cell.burned::after {
+    content: "🔥"; position: absolute; top: 4px; left: 4px; font-size: 12px;
+    text-shadow: 0 0 6px #000; pointer-events: none;
+  }
+  .skeleton { background: linear-gradient(90deg,#16181d,#1d2026,#16181d);
+              background-size: 200% 100%; animation: sk 1.4s infinite; }
+  @keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  #sentinel { height: 60px; margin: 24px 0 0; color: #666; text-align: center;
+              font-size: 12px; line-height: 60px; }
+  .filter-hidden { display: none !important; }
+  #modal { position: fixed; inset: 0; background: #000c; display: none;
+           align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  #modal.on { display: flex; }
+  #modal .box { background: #16181d; border-radius: 6px; padding: 18px;
+                max-width: 440px; width: 100%; }
+  #modal .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+                background: #0b0c10; border-radius: 4px; margin-bottom: 12px; }
+  #modal .meta { font-size: 12px; color: #ccc; word-break: break-all; line-height: 1.7; }
+  #modal .meta b { color: #fff; }
+  #modal .meta a { color: #6cf; text-decoration: none; }
+  #modal .x { float: right; color: #888; cursor: pointer; padding: 0 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — live state + your local archive of burned ones</h1>
+  <div class="sub">
+    rendered from
+    <a href="https://etherscan.io/address/0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1" target="_blank" rel="noopener">token</a>
+    +
+    <a href="https://etherscan.io/address/0x4839ed1943afdeb68e898999b311bdf7879c4440" target="_blank" rel="noopener">hook</a>
+    · burned jiffs preserved in IndexedDB on your device
+    <br>→ <a href="/jiff/minted">recent mints</a> · <a href="/jiff/grind">seed grinder</a> · <a href="/jiff/predict">predictor</a> · <a href="/jiff/collisions">collisions</a> · <a href="/jiff/clone">clone sniper</a>
+    <br>uPEG suite: <a href="/upeg">/upeg</a>
+  </div>
+</header>
+<div id="status">connecting…</div>
+<div class="walletbar">
+  <input id="walletInput" placeholder="0x… wallet address" autocomplete="off" spellcheck="false">
+  <button id="walletGo">look up wallet</button>
+  <button id="walletClear" style="display:none">← back to all</button>
+  <input id="idInput" placeholder="JIFF # (e.g. 1234)" autocomplete="off" spellcheck="false" style="min-width:160px">
+  <button id="idGo">find by id</button>
+</div>
+<div class="levelbar" id="levels"></div>
+<div class="toolbar">
+  <button id="filterAll" class="on">all</button>
+  <button id="filterAlive">alive</button>
+  <button id="filterBurned">burned 🔥</button>
+  <span class="pill" id="counts"></span>
+  <button id="export" style="margin-left:auto">export json</button>
+  <button id="clearCache">clear cache</button>
+</div>
+<div id="grid"></div>
+<div id="sentinel">scroll for more</div>
+
+<div id="modal" onclick="if(event.target.id==='modal')this.classList.remove('on')">
+  <div class="box">
+    <span class="x" onclick="document.getElementById('modal').classList.remove('on')">✕</span>
+    <div class="art" id="modalArt"></div>
+    <div class="meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1";
+const HOOK  = "0x4839ed1943afdeb68e898999b311bdf7879c4440";
+const PAGE_TARGET  = 100;
+const HOLDER_BATCH = 8;
+
+// --- precomputed function selectors (JIFF interface — same names as uPEG) ---
+const SEL = {
+  HoldersCount:    "0x8c979559",
+  Holder:          "0x1a773210",
+  UpegsTotalCount: "0xd396bbff",
+  UpegsLiveCount:  "0x95804985",
+  UpegsLevelCounts:"0x8b643f55",
+  OwnerUpegsCount: "0x067b2601",
+  OwnerUpegsPage:  "0x407d4fb4",
+  generate:        "0x4a7dd523"
+};
+
+// --- ABI helpers ---
+function pad32(hex) { return hex.replace(/^0x/, "").toLowerCase().padStart(64, "0"); }
+function uintToHex(n) { return pad32(BigInt(n).toString(16)); }
+function addrToHex(a) { return pad32(a.replace(/^0x/, "").toLowerCase()); }
+
+function callOwnerUpegsPage(a,p,s)  { return SEL.OwnerUpegsPage + addrToHex(a) + uintToHex(p) + uintToHex(s); }
+function callHolder(i)              { return SEL.Holder + uintToHex(i); }
+function callOwnerUpegsCount(a)     { return SEL.OwnerUpegsCount + addrToHex(a); }
+function callGenerate(seed)         { return SEL.generate + pad32(BigInt(seed).toString(16)); }
+
+function decodeUint(hex)    { return BigInt(hex); }
+function decodeAddress(hex) { return "0x" + hex.replace(/^0x/, "").slice(-40); }
+
+function decodeOwnerUpegsPage(hex) {
+  const data = hex.replace(/^0x/, "");
+  if (data.length < 128) return [];
+  const len = parseInt(data.slice(64, 128), 16);
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    const base = 128 + i * 128;
+    const idHex   = data.slice(base, base + 64);
+    const seedHex = data.slice(base + 64, base + 128);
+    out.push({ id: Number(BigInt("0x" + idHex)), seed: BigInt("0x" + seedHex).toString() });
+  }
+  return out;
+}
+
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  if (data.length < 128) return "";
+  const len = parseInt(data.slice(64, 128), 16);
+  const utf8 = data.slice(128, 128 + len * 2);
+  let s = "";
+  for (let i = 0; i < utf8.length; i += 2) s += String.fromCharCode(parseInt(utf8.slice(i, i + 2), 16));
+  return s;
+}
+
+function decodeUintArray5(hex) {
+  const data = hex.replace(/^0x/, "");
+  const out = [];
+  for (let i = 0; i < 5; i++) out.push(Number(BigInt("0x" + data.slice(i*64, (i+1)*64))));
+  return out;
+}
+
+// JIFF level: byte 14 of seed (level | shift 112)
+function levelOf(seedStr) { return Number((BigInt(seedStr) >> 112n) & 0xFFn); }
+
+// --- RPC ---
+let rpcId = 0;
+async function call(to, data) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method: "eth_call",
+                           params: [{ to, data }, "latest"] })
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  return j.result;
+}
+async function pmap(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) {
+      const k = i++;
+      try { out[k] = await fn(items[k], k); }
+      catch (e) { out[k] = { _err: String(e) }; }
+    }
+  }));
+  return out;
+}
+
+// --- IndexedDB archive (separate from uPEG: jiff-archive) ---
+const DB_NAME = "jiff-archive", STORE = "jiffs";
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: "id" });
+    r.onsuccess = () => {
+      r.result.onclose = () => { db = null; };
+      r.result.onversionchange = () => { try { r.result.close(); } catch {} db = null; };
+      res(r.result);
+    };
+    r.onerror = () => rej(r.error);
+  });
+}
+async function ensureDB() { if (!db) db = await openDB(); return db; }
+function dbGetAll(db) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readonly");
+  const r = tx.objectStore(STORE).getAll();
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+}); }
+function dbBulkPut(db, items) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readwrite");
+  const s = tx.objectStore(STORE);
+  for (const it of items) s.put(it);
+  tx.oncomplete = res;
+  tx.onerror = () => rej(tx.error);
+}); }
+function dbClear(db) { return new Promise((res, rej) => {
+  const tx = db.transaction(STORE, "readwrite");
+  tx.objectStore(STORE).clear();
+  tx.oncomplete = res;
+  tx.onerror = () => rej(tx.error);
+}); }
+
+// --- DOM ---
+const $status = document.getElementById("status");
+const $grid   = document.getElementById("grid");
+const $sent   = document.getElementById("sentinel");
+const $modal  = document.getElementById("modal");
+const $mArt   = document.getElementById("modalArt");
+const $mMeta  = document.getElementById("modalMeta");
+const $counts = document.getElementById("counts");
+const $levels = document.getElementById("levels");
+const $fAll = document.getElementById("filterAll"),
+      $fAlive = document.getElementById("filterAlive"),
+      $fBurned = document.getElementById("filterBurned"),
+      $export = document.getElementById("export"),
+      $clear = document.getElementById("clearCache"),
+      $wIn = document.getElementById("walletInput"),
+      $wGo = document.getElementById("walletGo"),
+      $wClear = document.getElementById("walletClear");
+
+let db;
+let holdersCount = 0, totalEverMinted = 0, liveCount = 0;
+let levelCounts = [0,0,0,0,0];
+let nextHolderIdx = 0, totalRendered = 0;
+let loading = false, scanComplete = false;
+const liveAlive = new Set();
+const cellsById = new Map();
+let filter = "all";
+let levelFilter = null;  // null or 0..4
+let walletMode = null;
+
+function fmtAddr(a) { return a.slice(0,6) + "…" + a.slice(-4); }
+function fmtTime(t) { return new Date(t).toLocaleString(); }
+
+function renderLevelBar() {
+  const labels = ["L0 common","L1","L2","L3 rare","L4 rarest"];
+  const wKey = walletMode ? Array.from(cellsById.values()).filter(c=>c.record.holder.toLowerCase()===walletMode) : null;
+  const counts = wKey
+    ? [0,0,0,0,0].map((_,i) => wKey.filter(c => c.record.status==="alive" && levelOf(c.record.seed)===i).length)
+    : levelCounts;
+  $levels.innerHTML = `<div class="lv ${levelFilter===null?'on':''}" data-lv="">all</div>` +
+    counts.map((c,i) =>
+      `<div class="lv l${i} ${levelFilter===i?'on':''}" data-lv="${i}">${labels[i]} <span class="c">${c}</span></div>`
+    ).join("");
+  $levels.querySelectorAll(".lv").forEach(el => el.onclick = () => {
+    const v = el.dataset.lv;
+    levelFilter = v === "" ? null : Number(v);
+    renderLevelBar();
+    applyFilter();
+  });
+}
+
+function openModal(r) {
+  $mArt.innerHTML = r.svg || "";
+  const lvl = levelOf(r.seed);
+  $mMeta.innerHTML =
+    `<b>JIFF #${r.id}</b> · L${lvl} · ${r.status === "burned" ? "🔥 burned" : "alive"}<br>` +
+    (r.status === "burned"
+      ? `last seen with <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`
+      : `held by <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`) +
+    `seed: <span style="font-size:10px">${r.seed}</span><br>` +
+    `first cached: ${fmtTime(r.firstSeenAt)}<br>` +
+    `last seen: ${fmtTime(r.lastSeenAt)}`;
+  $modal.classList.add("on");
+}
+
+function applyFilter() {
+  for (const { div, record } of cellsById.values()) {
+    let show =
+      filter === "all" ||
+      (filter === "alive" && record.status === "alive") ||
+      (filter === "burned" && record.status === "burned");
+    if (walletMode && record.holder.toLowerCase() !== walletMode) show = false;
+    if (levelFilter !== null && levelOf(record.seed) !== levelFilter) show = false;
+    div.classList.toggle("filter-hidden", !show);
+  }
+}
+
+function refreshCounts() {
+  let alive = 0, burned = 0;
+  for (const { record } of cellsById.values()) {
+    if (record.status === "alive") alive++; else burned++;
+  }
+  $counts.textContent = `${alive.toLocaleString()} alive · ${burned.toLocaleString()} burned in archive`;
+}
+
+function renderCell(record) {
+  const existing = cellsById.get(record.id);
+  if (existing) {
+    existing.record = record;
+    existing.div.classList.toggle("burned", record.status === "burned");
+    if (record.svg && !existing.div._hasSvg) {
+      const lvl = levelOf(record.seed);
+      existing.div.innerHTML = record.svg + `<span class="lv l${lvl}">L${lvl}</span><span class="tag">#${record.id}</span>`;
+      existing.div._hasSvg = true;
+    }
+    return existing.div;
+  }
+  const lvl = levelOf(record.seed);
+  const div = document.createElement("div");
+  div.className = "cell" + (record.svg ? "" : " skeleton") + (record.status === "burned" ? " burned" : "");
+  div.dataset.id = record.id;
+  div.title = `JIFF #${record.id} · L${lvl} · ${fmtAddr(record.holder)}`;
+  div.innerHTML = (record.svg || "") + `<span class="lv l${lvl}">L${lvl}</span><span class="tag">#${record.id}</span>`;
+  div._hasSvg = !!record.svg;
+  div.addEventListener("click", () => openModal(record));
+  $grid.appendChild(div);
+  cellsById.set(record.id, { div, record });
+  return div;
+}
+
+async function init() {
+  try { db = await openDB(); }
+  catch (e) { $status.textContent = "IndexedDB unavailable: " + e.message; return; }
+
+  const cached = await dbGetAll(await ensureDB());
+  cached.sort((a, b) => a.id - b.id);
+  $status.textContent = `loading ${cached.length.toLocaleString()} from local archive…`;
+  for (const c of cached) renderCell({ ...c, status: "alive" });
+  refreshCounts();
+
+  try {
+    const [hcRaw, totalRaw, liveRaw, lvlRaw] = await Promise.all([
+      call(TOKEN, SEL.HoldersCount),
+      call(TOKEN, SEL.UpegsTotalCount),
+      call(TOKEN, SEL.UpegsLiveCount),
+      call(TOKEN, SEL.UpegsLevelCounts)
+    ]);
+    holdersCount    = Number(decodeUint(hcRaw));
+    totalEverMinted = Number(decodeUint(totalRaw));
+    liveCount       = Number(decodeUint(liveRaw));
+    levelCounts     = decodeUintArray5(lvlRaw);
+  } catch (e) {
+    $status.textContent = "header RPC failed: " + e.message;
+    return;
+  }
+  $status.textContent =
+    `${holdersCount.toLocaleString()} holders · ${liveCount.toLocaleString()} live · ${totalEverMinted.toLocaleString()} ever minted · ${cached.length.toLocaleString()} cached locally`;
+  renderLevelBar();
+
+  const hash = location.hash.match(/wallet=(0x[0-9a-fA-F]{40})/);
+  if (hash) { $wIn.value = hash[1]; await openWallet(hash[1]); }
+  else await loadMore();
+}
+
+async function loadMore() {
+  if (loading || scanComplete || walletMode) return;
+  if (holdersCount === 0) return;
+  loading = true;
+  const startCount = totalRendered;
+
+  try {
+    while (totalRendered - startCount < PAGE_TARGET && nextHolderIdx < holdersCount) {
+      const sliceEnd = Math.min(nextHolderIdx + HOLDER_BATCH, holdersCount);
+      const idxs = Array.from({ length: sliceEnd - nextHolderIdx }, (_, k) => nextHolderIdx + k);
+      nextHolderIdx = sliceEnd;
+      $status.textContent = `${totalRendered} new · holders ${idxs[0]}…${idxs[idxs.length-1]} of ${holdersCount}`;
+
+      const holders = (await pmap(idxs, HOLDER_BATCH, async i =>
+        decodeAddress(await call(TOKEN, callHolder(i)))
+      )).filter(a => typeof a === "string" && /^0x[0-9a-f]{40}$/i.test(a)
+                     && a !== "0x0000000000000000000000000000000000000000");
+      if (holders.length === 0) continue;
+
+      const pages = await pmap(holders, HOLDER_BATCH, async h =>
+        decodeOwnerUpegsPage(await call(TOKEN, callOwnerUpegsPage(h, 0, 100)))
+      );
+
+      const pairs = [];
+      for (let i = 0; i < holders.length; i++) {
+        const arr = pages[i];
+        if (!arr || arr._err) continue;
+        for (const u of arr) pairs.push({ id: u.id, seed: u.seed, holder: holders[i] });
+      }
+      if (pairs.length === 0) continue;
+
+      const now = Date.now();
+      for (const p of pairs) liveAlive.add(p.id);
+
+      const needSvg = pairs.filter(p => {
+        const ex = cellsById.get(p.id);
+        return !ex || !ex.record.svg;
+      });
+      const svgs = await pmap(needSvg, HOLDER_BATCH, async p => {
+        try { return decodeString(await call(HOOK, callGenerate(p.seed))); }
+        catch { return null; }
+      });
+      const svgById = new Map();
+      needSvg.forEach((p, i) => svgById.set(p.id, svgs[i]));
+
+      const toCache = [];
+      for (const p of pairs) {
+        const ex = cellsById.get(p.id);
+        const svg = ex?.record?.svg || svgById.get(p.id);
+        const record = {
+          id: p.id, seed: p.seed, svg, holder: p.holder,
+          status: "alive",
+          firstSeenAt: ex?.record?.firstSeenAt || now,
+          lastSeenAt: now
+        };
+        renderCell(record);
+        if (!ex || ex.record.status !== "alive" || ex.record.holder !== p.holder) toCache.push(record);
+      }
+      if (toCache.length) await dbBulkPut(await ensureDB(), toCache);
+
+      totalRendered += pairs.length;
+      refreshCounts();
+      applyFilter();
+    }
+  } catch (e) {
+    $status.textContent = "scan error: " + e.message;
+    loading = false;
+    return;
+  }
+
+  if (nextHolderIdx >= holdersCount && !scanComplete) {
+    scanComplete = true;
+    const burnedNow = [];
+    for (const [id, { record }] of cellsById) {
+      if (!liveAlive.has(id) && record.status !== "burned") {
+        record.status = "burned";
+        burnedNow.push({ ...record, status: "burned" });
+      }
+    }
+    if (burnedNow.length) await dbBulkPut(await ensureDB(), burnedNow);
+    for (const { div, record } of cellsById.values())
+      div.classList.toggle("burned", record.status === "burned");
+    refreshCounts();
+    applyFilter();
+    $sent.textContent = `✓ scan complete — ${liveAlive.size.toLocaleString()} alive · ${cellsById.size - liveAlive.size} burned in archive`;
+  } else {
+    $status.textContent = `${liveAlive.size.toLocaleString()} alive seen · ${holdersCount - nextHolderIdx} holders left`;
+  }
+  loading = false;
+}
+
+async function openWallet(addr) {
+  addr = addr.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(addr)) { $status.textContent = "invalid address"; return; }
+  walletMode = addr;
+  $wClear.style.display = "";
+  location.hash = "wallet=" + addr;
+  $sent.textContent = `wallet view — fetching live state for ${fmtAddr(addr)}…`;
+
+  const now = Date.now();
+  let page = 0;
+  const live = [];
+  while (true) {
+    let arr;
+    try { arr = decodeOwnerUpegsPage(await call(TOKEN, callOwnerUpegsPage(addr, page, 100))); }
+    catch (e) { $status.textContent = "wallet RPC error: " + e.message; break; }
+    if (arr.length === 0) break;
+    live.push(...arr);
+    if (arr.length < 100) break;
+    page++;
+    if (page > 100) break;
+  }
+
+  const need = live.filter(u => {
+    const ex = cellsById.get(u.id);
+    return !ex || !ex.record.svg;
+  });
+  const svgs = await pmap(need, HOLDER_BATCH, async u => {
+    try { return decodeString(await call(HOOK, callGenerate(u.seed))); }
+    catch { return null; }
+  });
+  const svgById = new Map();
+  need.forEach((u, i) => svgById.set(u.id, svgs[i]));
+
+  const toCache = [];
+  for (const u of live) {
+    const ex = cellsById.get(u.id);
+    const svg = ex?.record?.svg || svgById.get(u.id);
+    const record = {
+      id: u.id, seed: u.seed, svg, holder: addr,
+      status: "alive",
+      firstSeenAt: ex?.record?.firstSeenAt || now,
+      lastSeenAt: now
+    };
+    renderCell(record);
+    toCache.push(record);
+  }
+  if (toCache.length) await dbBulkPut(db, toCache);
+
+  refreshCounts();
+  renderLevelBar();
+  applyFilter();
+  const lvlBreakdown = [0,1,2,3,4].map(L => `L${L}: ${live.filter(u => levelOf(u.seed)===L).length}`).join(" · ");
+  $sent.textContent = `wallet ${fmtAddr(addr)} — ${live.length} held (${lvlBreakdown})`;
+}
+
+function exitWallet() {
+  walletMode = null;
+  $wClear.style.display = "none";
+  $wIn.value = "";
+  history.replaceState(null, "", location.pathname);
+  refreshCounts();
+  renderLevelBar();
+  applyFilter();
+  if (!scanComplete) loadMore();
+}
+
+function setFilter(name) {
+  filter = name;
+  for (const b of [$fAll, $fAlive, $fBurned]) b.classList.remove("on");
+  ({ all: $fAll, alive: $fAlive, burned: $fBurned })[name].classList.add("on");
+  applyFilter();
+}
+$fAll.onclick = () => setFilter("all");
+$fAlive.onclick = () => setFilter("alive");
+$fBurned.onclick = () => setFilter("burned");
+
+$export.onclick = async () => {
+  const all = await dbGetAll(await ensureDB());
+  const blob = new Blob([JSON.stringify(all, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `jiff-archive-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+$clear.onclick = async () => {
+  if (!confirm("delete all cached jiffs from this browser?")) return;
+  await dbClear(await ensureDB());
+  for (const { div } of cellsById.values()) div.remove();
+  cellsById.clear();
+  liveAlive.clear();
+  scanComplete = false;
+  nextHolderIdx = 0;
+  totalRendered = 0;
+  refreshCounts();
+  $sent.textContent = "scroll for more";
+  if (!walletMode) await loadMore();
+};
+
+$wGo.onclick = () => openWallet($wIn.value);
+$wIn.addEventListener("keydown", e => { if (e.key === "Enter") openWallet($wIn.value); });
+$wClear.onclick = exitWallet;
+
+// find by id — reads _jiffs[id] storage slot directly (slot 0 of JIFF base)
+async function findById(idStr) {
+  const id = Number(idStr);
+  if (!Number.isInteger(id) || id < 1) {
+    $status.textContent = "invalid id — enter a positive integer";
+    return;
+  }
+  $status.textContent = `looking up JIFF #${id}…`;
+  let keccak_256;
+  try {
+    const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+    keccak_256 = noble.keccak_256;
+  } catch (e) { $status.textContent = "keccak load failed: " + e.message; return; }
+  const idHex = BigInt(id).toString(16).padStart(64, "0");
+  const concat = idHex + "0".repeat(64);
+  const concatBytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
+  const hashBytes = keccak_256(concatBytes);
+  const storageKey = "0x" + Array.from(hashBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  let seedHex;
+  try {
+    const res = await fetch(RPC, {
+      method: "POST", headers: {"content-type":"application/json"},
+      body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method:"eth_getStorageAt",
+                              params:[TOKEN, storageKey, "latest"] })
+    });
+    seedHex = (await res.json()).result;
+  } catch (e) { $status.textContent = "RPC error: " + e.message; return; }
+  if (!seedHex || seedHex === "0x" + "0".repeat(64)) {
+    $status.textContent = `JIFF #${id} not found — burned or never existed`;
+    return;
+  }
+  const seed = BigInt(seedHex).toString();
+  let svg;
+  try { svg = decodeString(await call(HOOK, callGenerate(seed))); }
+  catch (e) { $status.textContent = "SVG render failed: " + e.message; return; }
+
+  const now = Date.now();
+  const ex = cellsById.get(id);
+  const record = {
+    id, seed, svg,
+    holder: ex?.record?.holder || "0x0000000000000000000000000000000000000000",
+    status: "alive",
+    firstSeenAt: ex?.record?.firstSeenAt || now,
+    lastSeenAt: now
+  };
+  try { await dbBulkPut(await ensureDB(), [record]); } catch {}
+  renderCell(record);
+  openModal(record);
+  $status.textContent = `found JIFF #${id} (L${levelOf(seed)})`;
+}
+const $idIn = document.getElementById("idInput");
+const $idGo = document.getElementById("idGo");
+$idGo.onclick = () => findById($idIn.value);
+$idIn.addEventListener("keydown", e => { if (e.key === "Enter") findById($idIn.value); });
+
+const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); },
+                                    { rootMargin: "400px 0px" });
+io.observe($sent);
+
+init().catch(e => { $status.textContent = "init error: " + e.message; });
+</script>
+</body>
+</html>

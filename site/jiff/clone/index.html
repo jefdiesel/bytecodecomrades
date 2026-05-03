@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JIFF — clone target sniper</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 11px; margin: 0 0 10px; color: #888; font-weight: 600;
+              text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
+  .row label { color: #888; min-width: 130px; }
+  .row .v { color: #fff; word-break: break-all; }
+  input, button, select { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
+                  padding: 5px 10px; border-radius: 3px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { background: #262a32; }
+  button.primary { background: #2a3548; border-color: #3d5277; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .compare > div { background: #0b0c10; border-radius: 4px; padding: 12px; }
+  .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+         background: #0b0c10; border-radius: 4px; margin-bottom: 8px; }
+  .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 3px; font-size: 10px; }
+  .traits .t { background: #16181d; padding: 3px 5px; border-radius: 2px; display: flex; justify-content: space-between; }
+  .traits .t .k { color: #888; }
+  .traits .t .v { color: #fff; }
+  .traits .t.zero { opacity: .35; }
+  .traits .t.match { background: #2a4a2a; }
+  .traits .t.mismatch { background: #4a2a2a; }
+  .verdict { font-size: 18px; padding: 12px; border-radius: 4px; text-align: center; margin: 12px 0; }
+  .verdict.match { background: #2a4a2a; color: #6f6; }
+  .verdict.no-match { background: #1d2026; color: #888; }
+  .verdict.level-up { background: #4a4a35; color: #ffc; }
+  #log { font-size: 11px; line-height: 1.6; color: #888; max-height: 200px; overflow-y: auto;
+         padding: 8px; background: #0b0c10; border-radius: 3px; margin-top: 10px; }
+  #log .alert { color: #6f6; font-weight: 600; }
+  #log .miss { color: #666; }
+  .stats-row { display: flex; gap: 24px; font-size: 12px; flex-wrap: wrap; }
+  .stats-row .v { color: #fff; font-weight: 600; }
+  .stats-row .k { color: #888; display: block; font-size: 10px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 10px; }
+  .badge.l4 { background: #ffc; color: #000; }
+  .badge.l3 { background: #fcf; color: #000; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>JIFF — clone target sniper</h1>
+  <div class="sub">
+    Two modes:<br>
+    1. <b>Clone</b> — load a target JIFF id; on every poll, simulate the next mint and compare. If predicted traits match the target, fire an LP <code>removeLiquidity</code> via Flashbots before any swap rolls the seed.<br>
+    2. <b>Level rush</b> — set a min level (e.g. L4). On every poll, simulate the next mint. If predicted level ≥ threshold, alert + fire your buy.
+    <br>← <a href="/jiff">gallery</a> · <a href="/jiff/predict">predictor</a> · <a href="/jiff/collisions">collisions</a>
+  </div>
+</header>
+
+<div class="panel">
+  <h2>mode</h2>
+  <div class="row">
+    <label>mode</label>
+    <select id="mode">
+      <option value="level">level rush (any L≥N)</option>
+      <option value="clone">clone target (specific id)</option>
+    </select>
+    <span style="margin-left:12px" id="modeOpts"></span>
+  </div>
+  <div class="row" id="cloneRow" style="display:none">
+    <input id="targetId" type="number" placeholder="JIFF # to clone" min="1" style="width: 200px">
+    <button id="loadTarget" class="primary">load target</button>
+    <span id="targetStatus" style="color:#888"></span>
+  </div>
+  <div class="row" id="levelRow">
+    <label>min level</label>
+    <select id="minLevel">
+      <option value="3">L3+ (rare)</option>
+      <option value="4" selected>L4 only (rarest)</option>
+    </select>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>compare: <span id="cmpLabel">target ↔ next mint from current state</span></h2>
+  <div class="compare">
+    <div>
+      <div style="font-size:11px;color:#888;margin-bottom:6px" id="leftLabel">TARGET</div>
+      <div class="art" id="targetArt"></div>
+      <div class="traits" id="targetTraits"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#888;margin-bottom:6px">NEXT MINT (predicted, current state)</div>
+      <div class="art" id="predArt"></div>
+      <div class="traits" id="predTraits"></div>
+    </div>
+  </div>
+  <div class="verdict" id="verdict">load target / pick mode + start polling →</div>
+</div>
+
+<div class="panel">
+  <h2>polling</h2>
+  <div class="row" style="display:block">
+    <button id="pollToggle" class="primary">start polling (every 12s)</button>
+    <button id="pollFast">fast poll (every 4s)</button>
+    <button id="pollOnce">poll once</button>
+  </div>
+  <div class="stats-row" style="margin-top: 12px">
+    <div><span class="k">attempts</span><span class="v" id="attempts">0</span></div>
+    <div><span class="k">matches found</span><span class="v" id="matchesCount">0</span></div>
+    <div><span class="k">last poll</span><span class="v" id="lastPoll">—</span></div>
+    <div><span class="k">current hook seed</span><span class="v" id="curSeed" style="font-size:10px;max-width:300px">—</span></div>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0xf12DDD4688c7B710a6F7e2d30cFE6C72D98853d1";
+const HOOK  = "0x4839ed1943afdeb68e898999b311bdf7879c4440";
+
+const SEL = {
+  randomSeed:         "0x0b747d91",
+  generate:           "0x4a7dd523",
+  getLevelImageParams:"0x7e6f3268",
+  UpegLevelGateBps:   "0xcb76f79c"
+};
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const r = await fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+function pad32(h){ return h.replace(/^0x/,"").toLowerCase().padStart(64,"0"); }
+function hexToBytes(h) {
+  h = h.replace(/^0x/, "");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i*2, i*2+2), 16);
+  return out;
+}
+function bytesToHex(b) { return Array.from(b).map(x => x.toString(16).padStart(2,"0")).join(""); }
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  let s = "";
+  for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
+  return s;
+}
+function decodeLevelParams(hex) {
+  const data = hex.replace(/^0x/, "");
+  const slot = i => parseInt(data.slice(i*64, (i+1)*64).slice(-8), 16);
+  return {
+    backgroundColorsCount:        slot(0),
+    backgroundBottomColorsCount:  slot(1),
+    bubbleCount:                  slot(2),
+    bubbleColorsCount:            slot(3),
+    bellCount:                    slot(4),
+    medusaColorsCount:            slot(5),
+    weedCount:                    slot(6),
+    tentacleCount:                slot(7),
+    groundCount:                  slot(8),
+    groundColorsCount:            slot(9)
+  };
+}
+
+let _k = null;
+async function keccak() {
+  if (_k) return _k;
+  const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+  _k = noble.keccak_256;
+  return _k;
+}
+
+function decodeTraits(seedStr){
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background: b(0), backgroundBottom: b(1),
+    bubble: b(2), weed: b(3),
+    mirrorTime: b(4), bobTime: b(5),
+    tentacle: b(6), bell: b(7), ground: b(8),
+    bellColor: b(9), weedColor: b(10), groundColor: b(11),
+    bubbleColor: b(12), tentacleColor: b(13),
+    level: b(14)
+  };
+}
+
+async function simulateMint(randomSeed, levelGates, levelParams) {
+  const k = await keccak();
+  let nonce = 0n;
+  function next() {
+    nonce += 1n;
+    const buf = new Uint8Array(64);
+    const seedHex  = BigInt(randomSeed).toString(16).padStart(64, "0");
+    const nonceHex = nonce.toString(16).padStart(64, "0");
+    buf.set(hexToBytes(seedHex),  0);
+    buf.set(hexToBytes(nonceHex), 32);
+    return BigInt("0x" + bytesToHex(k(buf)));
+  }
+  const chance    = (prob)  => (next() % 100n) < BigInt(prob);
+  const pickId    = (count) => count === 0 ? 0 : Number(next() % BigInt(count)) + 1;
+  const pickColor = (max)   => max === 0 ? 0 : Number(next() % BigInt(max));
+
+  let level = 4;
+  for (let lv = 0; lv < 4; lv++) {
+    if ((next() % 10000n) < BigInt(levelGates[lv])) { level = lv; break; }
+  }
+  const p = levelParams[level];
+
+  const t = {
+    background: 0, backgroundBottom: 0, bubble: 0, weed: 0,
+    mirrorTime: 0, bobTime: 0, tentacle: 0, bell: 0, ground: 0,
+    bellColor: 0, weedColor: 0, groundColor: 0, bubbleColor: 0, tentacleColor: 0
+  };
+  t.background = pickColor(p.backgroundColorsCount);
+  if (level === 4) t.backgroundBottom = pickColor(p.backgroundBottomColorsCount);
+  t.ground = p.groundCount === 0 ? 0 : pickId(p.groundCount);
+  if (t.ground > 0) t.groundColor = pickColor(p.groundColorsCount);
+  t.bubble = chance(75) ? pickId(p.bubbleCount) : 0;
+  if (t.bubble > 0) t.bubbleColor = pickColor(p.bubbleColorsCount);
+  t.weed = (level < 4 && chance(75)) ? pickId(p.weedCount) : 0;
+  if (t.weed > 0) t.weedColor = pickColor(p.medusaColorsCount);
+  t.tentacle      = pickColor(p.tentacleCount);
+  t.tentacleColor = pickColor(p.medusaColorsCount);
+  t.bell          = pickColor(p.bellCount);
+  t.bellColor     = pickColor(p.medusaColorsCount);
+  t.mirrorTime = Number(3n + (next() % 5n));
+  t.bobTime    = level < 2 ? 0 : Number(7n + (next() % 3n));
+
+  return { level, traits: t };
+}
+
+function packSeed(t, level) {
+  let s = 0n;
+  const put = (v, sh) => s |= BigInt(v) << BigInt(sh);
+  put(t.background, 0); put(t.backgroundBottom, 8);
+  put(t.bubble, 16); put(t.weed, 24);
+  put(t.mirrorTime, 32); put(t.bobTime, 40);
+  put(t.tentacle, 48); put(t.bell, 56); put(t.ground, 64);
+  put(t.bellColor, 72); put(t.weedColor, 80); put(t.groundColor, 88);
+  put(t.bubbleColor, 96); put(t.tentacleColor, 104);
+  put(level, 112);
+  return s.toString();
+}
+
+async function fetchSvg(seed) {
+  try { return decodeString(await rpc("eth_call", [{ to: HOOK, data: SEL.generate + pad32(BigInt(seed).toString(16)) }, "latest"])); }
+  catch { return ""; }
+}
+
+// Read _jiffs[id] from token storage. Slot 0 mapping → keccak256(id || 0)
+async function readTargetSeed(id) {
+  const k = await keccak();
+  const idHex = BigInt(id).toString(16).padStart(64, "0");
+  const concat = idHex + "0".repeat(64);
+  const concatBytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
+  const slot = "0x" + bytesToHex(k(concatBytes));
+  const v = await rpc("eth_getStorageAt", [TOKEN, slot, "latest"]);
+  if (!v || BigInt(v) === 0n) return null;
+  return BigInt(v).toString();
+}
+
+const $ = id => document.getElementById(id);
+
+function fieldList(t) {
+  return [
+    ["level", t.level],
+    ["background", t.background], ["backgroundBottom", t.backgroundBottom],
+    ["ground", t.ground], ["ground_color", t.groundColor],
+    ["bubble", t.bubble], ["bubble_color", t.bubbleColor],
+    ["weed", t.weed], ["weed_color", t.weedColor],
+    ["tentacle", t.tentacle], ["tentacle_color", t.tentacleColor],
+    ["bell", t.bell], ["bell_color", t.bellColor],
+    ["mirrorTime", t.mirrorTime], ["bobTime", t.bobTime],
+  ];
+}
+function renderTraits(t, container, vsTarget=null) {
+  const tFields = fieldList(t);
+  const targetFields = vsTarget ? fieldList(vsTarget) : null;
+  container.innerHTML = tFields.map(([k, v], i) => {
+    let cls = v === 0 ? 'zero' : '';
+    if (targetFields) {
+      const targetV = targetFields[i][1];
+      cls = (v === targetV) ? 'match' : 'mismatch';
+    }
+    return `<div class="t ${cls}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  }).join("");
+}
+
+let target = null;
+let levelParams = null;
+let attempts = 0;
+let matches = 0;
+
+async function getLevelParams() {
+  if (levelParams) return levelParams;
+  const out = [];
+  for (let lv = 0; lv < 5; lv++) {
+    const raw = await rpc("eth_call", [{ to: HOOK, data: SEL.getLevelImageParams + pad32(BigInt(lv).toString(16)) }, "latest"]);
+    out.push(decodeLevelParams(raw));
+  }
+  levelParams = out;
+  return out;
+}
+async function getGates() {
+  const out = [];
+  for (let lv = 0; lv < 4; lv++) {
+    const raw = await rpc("eth_call", [{ to: TOKEN, data: SEL.UpegLevelGateBps + pad32(BigInt(lv).toString(16)) }, "latest"]);
+    out.push(Number(BigInt(raw)));
+  }
+  return out;
+}
+
+async function loadTarget() {
+  const id = parseInt($("targetId").value, 10);
+  if (!Number.isInteger(id) || id < 1) { $("targetStatus").textContent = "invalid id"; return; }
+  $("targetStatus").textContent = "loading...";
+  const seed = await readTargetSeed(id);
+  if (!seed) { $("targetStatus").textContent = "id not found / burned"; return; }
+  const traits = decodeTraits(seed);
+  const svg = await fetchSvg(seed);
+  target = { id, seed, traits, svg };
+  $("targetArt").innerHTML = svg;
+  $("leftLabel").textContent = `TARGET #${id} (L${traits.level})`;
+  renderTraits(traits, $("targetTraits"));
+  $("targetStatus").innerHTML = `loaded · L${traits.level} · seed <code style="font-size:9px">${seed}</code>`;
+  if (!levelParams) await getLevelParams();
+  // Auto-poll once
+  await pollOnce();
+}
+
+function traitsEqual(a, b) {
+  return JSON.stringify(fieldList(a)) === JSON.stringify(fieldList(b));
+}
+
+function log(msg, klass) {
+  const t = new Date().toTimeString().slice(0,8);
+  $("log").insertAdjacentHTML("afterbegin", `<div class="${klass||''}">[${t}] ${msg}</div>`);
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(); osc.frequency.value = 880; osc.connect(ctx.destination); osc.start(); setTimeout(() => osc.stop(), 200);
+  } catch {}
+}
+
+function getMode() { return $("mode").value; }
+
+async function pollOnce() {
+  attempts++;
+  $("attempts").textContent = attempts;
+  $("lastPoll").textContent = new Date().toLocaleTimeString();
+  const mode = getMode();
+  if (mode === "clone" && !target) { log("load a target first", "miss"); return; }
+  try {
+    if (!levelParams) await getLevelParams();
+    const gates = await getGates();
+    const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
+    const curSeed = BigInt(seedHex).toString();
+    $("curSeed").textContent = curSeed.slice(0, 30) + "…" + curSeed.slice(-10);
+
+    // Simulate mint at CURRENT seed (no churn — assumes LP-withdraw path, which doesn't fire afterSwap roll).
+    // For the "after a swap" prediction, see /jiff/predict.
+    const { level: predLevel, traits: predTraits } = await simulateMint(curSeed, gates, levelParams);
+    const predSeed = packSeed(predTraits, predLevel);
+    const predSvg = await fetchSvg(predSeed);
+    $("predArt").innerHTML = predSvg;
+    renderTraits(predTraits, $("predTraits"), target?.traits);
+
+    if (mode === "clone") {
+      const isMatch = traitsEqual(predTraits, target.traits);
+      if (isMatch) {
+        matches++;
+        $("matchesCount").textContent = matches;
+        $("verdict").className = "verdict match";
+        $("verdict").innerHTML = `🎯 MATCH! Fire LP removeLiquidity NOW (within ~12s before next swap rolls seed).`;
+        log(`MATCH at attempt ${attempts}!`, "alert");
+        beep();
+      } else {
+        $("verdict").className = "verdict no-match";
+        $("verdict").innerHTML = `no match (attempt ${attempts}). Predicted L${predLevel}, target L${target.traits.level}.`;
+        log(`miss #${attempts} · pred L${predLevel}`, "miss");
+      }
+    } else {
+      // level rush
+      const minLevel = parseInt($("minLevel").value, 10);
+      const isMatch = predLevel >= minLevel;
+      if (isMatch) {
+        matches++;
+        $("matchesCount").textContent = matches;
+        const cls = predLevel === 4 ? "level-up" : "match";
+        $("verdict").className = "verdict " + cls;
+        $("verdict").innerHTML = `🎯 L${predLevel} predicted! Fire LP removeLiquidity (or buy + revert if level&lt;${minLevel} via wrapper).`;
+        log(`L${predLevel} hit at attempt ${attempts}!`, "alert");
+        beep();
+      } else {
+        $("verdict").className = "verdict no-match";
+        $("verdict").innerHTML = `current state predicts L${predLevel} (need L${minLevel}+). attempt ${attempts}.`;
+        log(`miss #${attempts} · pred L${predLevel}`, "miss");
+      }
+    }
+  } catch (e) {
+    log("poll error: " + e.message, "miss");
+  }
+}
+
+let pollInterval = null;
+function startPolling(ms) {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollOnce, ms);
+  pollOnce();
+  $("pollToggle").textContent = "stop polling";
+  log(`polling every ${ms/1000}s`, "alert");
+}
+function stopPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = null;
+  $("pollToggle").textContent = "start polling (every 12s)";
+  log("stopped", "miss");
+}
+
+$("loadTarget").onclick = loadTarget;
+$("pollOnce").onclick = pollOnce;
+$("pollToggle").onclick = () => pollInterval ? stopPolling() : startPolling(12000);
+$("pollFast").onclick = () => startPolling(4000);
+
+$("mode").onchange = () => {
+  const m = getMode();
+  $("cloneRow").style.display = m === "clone" ? "" : "none";
+  $("levelRow").style.display = m === "level" ? "" : "none";
+  if (m === "level") {
+    $("leftLabel").textContent = "criteria";
+    $("targetArt").innerHTML = "";
+    $("targetTraits").innerHTML = `<div class="t"><span class="k">min level</span><span class="v">≥${$("minLevel").value}</span></div>`;
+  }
+};
+$("mode").dispatchEvent(new Event("change"));
+
+// auto-start in level mode
+pollOnce();
+</script>
+</body>
+</html>
