@@ -56,8 +56,11 @@
     <div><span class="k">cloned ids</span><span class="v" id="cloned">—</span></div>
     <div><span class="k">collision rate</span><span class="v" id="rate">—</span></div>
   </div>
-  <div style="margin-top: 10px;">
+  <div style="margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
     <button id="rescan">re-read cache</button>
+    <input id="lookupId" type="number" placeholder="check id (e.g. 56495)" min="1" style="background:#0b0c10;color:#e8e8e8;border:1px solid #2a2e36;padding:5px 10px;border-radius:3px;font:inherit;width:200px">
+    <button id="lookupGo">check id for clones</button>
+    <button id="showAll" style="background:transparent;color:#888;border:none;text-decoration:underline">show all groups</button>
     <span id="status" style="margin-left: 8px"></span>
   </div>
 </div>
@@ -160,7 +163,85 @@ async function scan() {
   }
 }
 
-document.getElementById("rescan").onclick = scan;
+document.getElementById("rescan").onclick = () => { lastFilter = null; scan(); };
+
+let lastItems = null;
+let lastBySeed = null;
+let lastFilter = null;
+
+async function ensureLoaded() {
+  if (!lastItems) {
+    const db = await openDB();
+    lastItems = await dbGetAll(db);
+    lastBySeed = new Map();
+    for (const it of lastItems) {
+      if (!it.seed) continue;
+      const k = String(it.seed);
+      if (!lastBySeed.has(k)) lastBySeed.set(k, []);
+      lastBySeed.get(k).push(it);
+    }
+  }
+}
+
+async function lookupId(id) {
+  await ensureLoaded();
+  const target = lastItems.find(it => Number(it.id) === id);
+  const $groups = $("groups");
+  if (!target) {
+    $groups.innerHTML = `<div class="empty">uPEG #${id} not in your cache. Open <a href="/upeg">/upeg</a> and find it (use the "find by id" search) so it gets cached, then come back.</div>`;
+    return;
+  }
+  const group = lastBySeed.get(String(target.seed));
+  if (!group || group.length < 2) {
+    $groups.innerHTML = `
+      <div class="group">
+        <div class="head"><span style="color:#6f6">✓ NO CLONES (in cached scan)</span> · uPEG #${id} appears unique among ${lastItems.length} cached unicorns.</div>
+        <div class="members" style="grid-template-columns:160px;">
+          <div class="cell" style="aspect-ratio:1;width:160px;">${target.svg || ""}<span class="id">#${id}</span></div>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:6px">Caveat: cache covers ${lastItems.length}/~60k+ ever-minted. A clone could exist in the unscanned portion. Scroll more on /upeg to widen the sample.</div>
+        <div class="seed">seed: ${target.seed}</div>
+      </div>
+    `;
+    return;
+  }
+  // Render the matching group
+  const ids = group.map(g => g.id).sort((a, b) => a - b);
+  const otherIds = ids.filter(x => x !== id);
+  const allConsecutive = ids.every((x, i) => i === 0 || x === ids[i-1] + 1);
+  const flag = allConsecutive ? `<span style="color:#f6c">CONSECUTIVE</span>` : "";
+  $groups.innerHTML = `
+    <div class="group">
+      <div class="head">
+        <span class="count">⚠ uPEG #${id} HAS ${group.length-1} CLONE${group.length-1===1?'':'S'}</span> ${flag}
+        · all ids: ${ids.join(", ")}
+      </div>
+      <div class="members">
+        ${group.map(g =>
+          `<div class="cell" title="#${g.id} owner ${g.holder}" style="${g.id===id?'box-shadow:0 0 0 2px #f60;':''}">${g.svg || ""}<span class="id">#${g.id}</span></div>`
+        ).join("")}
+      </div>
+      <div class="seed">seed: ${target.seed}</div>
+      <div style="font-size:11px;color:#888;margin-top:6px">${id} is highlighted in orange. The other ids share its exact seed = identical unicorn = the "rarity" of #${id} is diluted by ${group.length-1}x.</div>
+    </div>
+  `;
+}
+
+document.getElementById("lookupGo").onclick = () => {
+  const v = document.getElementById("lookupId").value.trim();
+  const id = parseInt(v, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    $("status").textContent = "enter a positive integer id";
+    return;
+  }
+  lastFilter = id;
+  lookupId(id);
+};
+document.getElementById("lookupId").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("lookupGo").click();
+});
+document.getElementById("showAll").onclick = () => { lastFilter = null; scan(); };
+
 scan();
 </script>
 </body>
