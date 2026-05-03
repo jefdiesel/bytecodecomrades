@@ -289,6 +289,27 @@ function levelBadge(lvl) {
   return `<span class="badge ${cls}">${labels[lvl]}</span>`;
 }
 
+// Rarity score — same formula as /jiff gallery
+function rarityScore(traits, level, levelCounts) {
+  const total = levelCounts.reduce((a,b)=>a+b,0) || 1;
+  const lvlFreq = (levelCounts[level] || 1) / total;
+  let score = 1 / Math.max(lvlFreq, 0.0005);
+  if (traits.ground) score *= 1.15;
+  if (traits.weed)   score *= 1.20;
+  if (traits.bubble) score *= 1.05;
+  if (traits.tentacle) score *= 1.02;
+  if (traits.bell)   score *= 1.02;
+  if (level === 4 && traits.backgroundBottom > 0) score *= 1.5;
+  return Math.round(score * 10) / 10;
+}
+function rarityTier(score) {
+  if (score >= 200) return "GOD";
+  if (score >= 50)  return "MYTHIC";
+  if (score >= 20)  return "RARE";
+  if (score >= 8)   return "UNCOMMON";
+  return "COMMON";
+}
+
 function renderTraits(t, container) {
   const fields = [
     ["background", t.background],
@@ -374,7 +395,8 @@ async function refresh() {
     const { level, traits } = await simulateMint(nextRandSeed, gates, levelParams);
     const packed = packSeed(traits, level);
     $("nextSeed").textContent = packed + "  (rand: " + nextRandSeed.slice(0,18) + "…)";
-    $("rarity").innerHTML = levelBadge(level);
+    const rs = rarityScore(traits, level, lvlCounts);
+    $("rarity").innerHTML = levelBadge(level) + ` <span class="badge" style="margin-left:6px;background:#3d4a2a;color:#cf6">score ${rs} · ${rarityTier(rs)}</span>`;
     renderTraits(traits, $("nextTraits"));
     $("nextArt").innerHTML = await fetchSvg(packed);
 
@@ -386,14 +408,15 @@ async function refresh() {
       s = await nextSeed(s, c.toString(), ts, pr, bn);
       c += 1n;
       const sim = await simulateMint(s, gates, levelParams);
-      cells.push({ seed: packSeed(sim.traits, sim.level), idx: i, level: sim.level });
+      cells.push({ seed: packSeed(sim.traits, sim.level), idx: i, level: sim.level, traits: sim.traits });
     }
     await Promise.all(cells.map(async cell => { cell.svg = await fetchSvg(cell.seed); }));
     $("future").innerHTML = cells.map(cell => {
       const cls = cell.level === 4 ? "l4" : (cell.level === 3 ? "l3" : "");
-      return `<div class="scell ${cls}" title="seed ${cell.seed}">
+      const cellRs = rarityScore(cell.traits || {}, cell.level, lvlCounts);
+      return `<div class="scell ${cls}" title="seed ${cell.seed} · score ${cellRs}">
         <div class="art">${cell.svg}</div>
-        <div class="meta">+${cell.idx} · L${cell.level}</div>
+        <div class="meta">+${cell.idx} · L${cell.level} · ${cellRs}</div>
       </div>`;
     }).join("");
   } catch (e) {

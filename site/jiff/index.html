@@ -44,6 +44,11 @@
               background: #000c; color: #fff; border-radius: 2px; }
   .cell .lv.l4 { background: #ffc; color: #000; }
   .cell .lv.l3 { background: #fcf; color: #000; }
+  .cell .rs { position: absolute; bottom: 2px; left: 4px; font-size: 9px; padding: 0 3px;
+              background: #000c; color: #fff; border-radius: 2px; font-weight: 600; opacity: .9; }
+  .cell .rs.god { background: #ff6; color: #000; }
+  .cell .rs.mythic { background: #f6c; color: #fff; }
+  .cell .rs.rare { background: #6cf; color: #000; }
   .cell.burned svg { opacity: .35; filter: grayscale(.7); }
   .cell.burned::after {
     content: "🔥"; position: absolute; top: 4px; left: 4px; font-size: 12px;
@@ -95,6 +100,8 @@
   <button id="filterAll" class="on">all</button>
   <button id="filterAlive">alive</button>
   <button id="filterBurned">burned 🔥</button>
+  <button id="sortById" class="on">sort: id</button>
+  <button id="sortByRarity">sort: rarity ↓</button>
   <span class="pill" id="counts"></span>
   <button id="export" style="margin-left:auto">export json</button>
   <button id="clearCache">clear cache</button>
@@ -177,6 +184,49 @@ function decodeUintArray5(hex) {
 
 // JIFF level: byte 14 of seed (level | shift 112)
 function levelOf(seedStr) { return Number((BigInt(seedStr) >> 112n) & 0xFFn); }
+
+// Decode all bytes for trait detection
+function decodeTraits(seedStr) {
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background: b(0), backgroundBottom: b(1),
+    bubble: b(2), weed: b(3),
+    mirrorTime: b(4), bobTime: b(5),
+    tentacle: b(6), bell: b(7), ground: b(8),
+    bellColor: b(9), weedColor: b(10), groundColor: b(11),
+    bubbleColor: b(12), tentacleColor: b(13),
+    level: b(14)
+  };
+}
+
+// Rarity score: inverse-frequency of level (live counts) + bonus for present optional traits.
+// Higher score = rarer. Range typically 2..2000.
+function rarityScore(seedStr, levelCounts) {
+  const t = decodeTraits(seedStr);
+  const total = levelCounts.reduce((a,b)=>a+b,0) || 1;
+  const lvlFreq = (levelCounts[t.level] || 1) / total;
+  // Base: inverse of how common your level is (e.g. L4 ≈ 25x base)
+  let score = 1 / Math.max(lvlFreq, 0.0005);
+  // Optional traits — present is rarer than absent
+  if (t.ground) score *= 1.15;
+  if (t.weed)   score *= 1.20;
+  if (t.bubble) score *= 1.05;          // 75% chance of having one — barely a bonus
+  if (t.tentacle) score *= 1.02;
+  if (t.bell)   score *= 1.02;
+  // L4 has a unique gradient (backgroundBottom) — boost
+  if (t.level === 4 && t.backgroundBottom > 0) score *= 1.5;
+  return Math.round(score * 10) / 10;
+}
+
+// Rarity tier label for badges
+function rarityTier(score) {
+  if (score >= 200) return "GOD";
+  if (score >= 50)  return "MYTHIC";
+  if (score >= 20)  return "RARE";
+  if (score >= 8)   return "UNCOMMON";
+  return "COMMON";
+}
 
 // --- RPC ---
 let rpcId = 0;
@@ -292,8 +342,14 @@ function renderLevelBar() {
 function openModal(r) {
   $mArt.innerHTML = r.svg || "";
   const lvl = levelOf(r.seed);
+  const rs = rarityScore(r.seed, levelCounts);
+  const tier = rarityTier(rs);
+  const t = decodeTraits(r.seed);
+  const presentOpts = ["ground","weed","bubble","tentacle","bell"].filter(k => t[k] > 0);
   $mMeta.innerHTML =
     `<b>JIFF #${r.id}</b> · L${lvl} · ${r.status === "burned" ? "🔥 burned" : "alive"}<br>` +
+    `<span style="font-size:14px;color:#fc6;font-weight:600">${tier}</span> · rarity score <b>${rs}</b><br>` +
+    (presentOpts.length ? `traits present: ${presentOpts.join(", ")}<br>` : `traits present: none (sparse — rarer)<br>`) +
     (r.status === "burned"
       ? `last seen with <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`
       : `held by <a href="https://etherscan.io/address/${r.holder}" target="_blank" rel="noopener">${fmtAddr(r.holder)}</a><br>`) +
@@ -323,6 +379,12 @@ function refreshCounts() {
   $counts.textContent = `${alive.toLocaleString()} alive · ${burned.toLocaleString()} burned in archive`;
 }
 
+function rsBadge(score) {
+  const tier = rarityTier(score);
+  const cls = tier === "GOD" ? "god" : (tier === "MYTHIC" ? "mythic" : (tier === "RARE" ? "rare" : ""));
+  return `<span class="rs ${cls}" title="rarity score">${score}</span>`;
+}
+
 function renderCell(record) {
   const existing = cellsById.get(record.id);
   if (existing) {
@@ -330,17 +392,19 @@ function renderCell(record) {
     existing.div.classList.toggle("burned", record.status === "burned");
     if (record.svg && !existing.div._hasSvg) {
       const lvl = levelOf(record.seed);
-      existing.div.innerHTML = record.svg + `<span class="lv l${lvl}">L${lvl}</span><span class="tag">#${record.id}</span>`;
+      const rs = rarityScore(record.seed, levelCounts);
+      existing.div.innerHTML = record.svg + `<span class="lv l${lvl}">L${lvl}</span>${rsBadge(rs)}<span class="tag">#${record.id}</span>`;
       existing.div._hasSvg = true;
     }
     return existing.div;
   }
   const lvl = levelOf(record.seed);
+  const rs = rarityScore(record.seed, levelCounts);
   const div = document.createElement("div");
   div.className = "cell" + (record.svg ? "" : " skeleton") + (record.status === "burned" ? " burned" : "");
   div.dataset.id = record.id;
-  div.title = `JIFF #${record.id} · L${lvl} · ${fmtAddr(record.holder)}`;
-  div.innerHTML = (record.svg || "") + `<span class="lv l${lvl}">L${lvl}</span><span class="tag">#${record.id}</span>`;
+  div.title = `JIFF #${record.id} · L${lvl} · score ${rs} (${rarityTier(rs)}) · ${fmtAddr(record.holder)}`;
+  div.innerHTML = (record.svg || "") + `<span class="lv l${lvl}">L${lvl}</span>${rsBadge(rs)}<span class="tag">#${record.id}</span>`;
   div._hasSvg = !!record.svg;
   div.addEventListener("click", () => openModal(record));
   $grid.appendChild(div);
@@ -548,6 +612,29 @@ function setFilter(name) {
 $fAll.onclick = () => setFilter("all");
 $fAlive.onclick = () => setFilter("alive");
 $fBurned.onclick = () => setFilter("burned");
+
+let sortMode = "id";
+function applySort() {
+  const items = [...cellsById.values()];
+  if (sortMode === "rarity") {
+    items.sort((a, b) => rarityScore(b.record.seed, levelCounts) - rarityScore(a.record.seed, levelCounts));
+  } else {
+    items.sort((a, b) => a.record.id - b.record.id);
+  }
+  for (const { div } of items) $grid.appendChild(div);
+}
+document.getElementById("sortById").onclick = () => {
+  sortMode = "id";
+  document.getElementById("sortById").classList.add("on");
+  document.getElementById("sortByRarity").classList.remove("on");
+  applySort();
+};
+document.getElementById("sortByRarity").onclick = () => {
+  sortMode = "rarity";
+  document.getElementById("sortByRarity").classList.add("on");
+  document.getElementById("sortById").classList.remove("on");
+  applySort();
+};
 
 $export.onclick = async () => {
   const all = await dbGetAll(await ensureDB());

@@ -184,6 +184,27 @@ async function keccak() {
   return _k;
 }
 
+// Rarity score — same formula as gallery
+function rarityScoreFromTraits(t, level, levelCounts) {
+  const total = levelCounts.reduce((a,b)=>a+b,0) || 1;
+  const lvlFreq = (levelCounts[level] || 1) / total;
+  let score = 1 / Math.max(lvlFreq, 0.0005);
+  if (t.ground) score *= 1.15;
+  if (t.weed)   score *= 1.20;
+  if (t.bubble) score *= 1.05;
+  if (t.tentacle) score *= 1.02;
+  if (t.bell)   score *= 1.02;
+  if (level === 4 && t.backgroundBottom > 0) score *= 1.5;
+  return Math.round(score * 10) / 10;
+}
+function rarityTier(score) {
+  if (score >= 200) return "GOD";
+  if (score >= 50)  return "MYTHIC";
+  if (score >= 20)  return "RARE";
+  if (score >= 8)   return "UNCOMMON";
+  return "COMMON";
+}
+
 function decodeTraits(seedStr){
   const s = BigInt(seedStr);
   const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
@@ -325,6 +346,17 @@ async function getGates() {
   return out;
 }
 
+let cachedLevelCounts = [430, 199, 118, 49, 33]; // initial fallback; refreshed on each poll
+async function getLevelCounts() {
+  try {
+    const raw = await rpc("eth_call", [{ to: TOKEN, data: "0x8b643f55" }, "latest"]);
+    const data = raw.replace(/^0x/, "");
+    cachedLevelCounts = [];
+    for (let i = 0; i < 5; i++) cachedLevelCounts.push(Number(BigInt("0x" + data.slice(i*64, (i+1)*64))));
+  } catch {}
+  return cachedLevelCounts;
+}
+
 async function loadTarget() {
   const id = parseInt($("targetId").value, 10);
   if (!Number.isInteger(id) || id < 1) { $("targetStatus").textContent = "invalid id"; return; }
@@ -369,7 +401,7 @@ async function pollOnce() {
   if (mode === "clone" && !target) { log("load a target first", "miss"); return; }
   try {
     if (!levelParams) await getLevelParams();
-    const gates = await getGates();
+    const [gates, lvlCounts] = await Promise.all([getGates(), getLevelCounts()]);
     const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
     const curSeed = BigInt(seedHex).toString();
     $("curSeed").textContent = curSeed.slice(0, 30) + "…" + curSeed.slice(-10);
@@ -379,6 +411,8 @@ async function pollOnce() {
     const { level: predLevel, traits: predTraits } = await simulateMint(curSeed, gates, levelParams);
     const predSeed = packSeed(predTraits, predLevel);
     const predSvg = await fetchSvg(predSeed);
+    const predRs = rarityScoreFromTraits(predTraits, predLevel, lvlCounts);
+    const predTier = rarityTier(predRs);
     $("predArt").innerHTML = predSvg;
     renderTraits(predTraits, $("predTraits"), target?.traits);
 
@@ -405,13 +439,13 @@ async function pollOnce() {
         $("matchesCount").textContent = matches;
         const cls = predLevel === 4 ? "level-up" : "match";
         $("verdict").className = "verdict " + cls;
-        $("verdict").innerHTML = `🎯 L${predLevel} predicted! Fire LP removeLiquidity (or buy + revert if level&lt;${minLevel} via wrapper).`;
-        log(`L${predLevel} hit at attempt ${attempts}!`, "alert");
+        $("verdict").innerHTML = `🎯 L${predLevel} predicted (score ${predRs} · ${predTier})! Fire LP removeLiquidity (or buy + revert if level&lt;${minLevel} via wrapper).`;
+        log(`L${predLevel} hit at attempt ${attempts}! score ${predRs}`, "alert");
         beep();
       } else {
         $("verdict").className = "verdict no-match";
-        $("verdict").innerHTML = `current state predicts L${predLevel} (need L${minLevel}+). attempt ${attempts}.`;
-        log(`miss #${attempts} · pred L${predLevel}`, "miss");
+        $("verdict").innerHTML = `current state predicts L${predLevel} (score ${predRs} · ${predTier}; need L${minLevel}+). attempt ${attempts}.`;
+        log(`miss #${attempts} · pred L${predLevel} score ${predRs}`, "miss");
       }
     }
   } catch (e) {
