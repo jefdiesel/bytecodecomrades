@@ -297,6 +297,8 @@ async function loadTarget() {
   renderTraits(traits, $("targetTraits"));
   $("targetStatus").innerHTML = `loaded · seed <code style="font-size:9px">${seed}</code>`;
   if (!params) params = decodeImageParams(await rpc("eth_call", [{ to: HOOK, data: SEL.getImageParams }, "latest"]));
+  // Auto-poll once so the user immediately sees the "next mint" comparison + verdict
+  await pollOnce();
 }
 
 function traitsEqual(a, b) {
