@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG — seed collision scan</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .stats { display: flex; gap: 24px; font-size: 13px; flex-wrap: wrap; }
+  .stats .v { color: #fff; font-weight: 600; font-size: 16px; }
+  .stats .k { color: #888; font-size: 11px; display: block; }
+  button { background: #2a3548; color: #e8e8e8; border: 1px solid #3d5277;
+           padding: 5px 10px; border-radius: 3px; cursor: pointer; font: inherit; }
+  button:hover { background: #36456b; }
+  .group { background: #16181d; border-radius: 4px; padding: 12px; margin-bottom: 8px; }
+  .group .head { font-size: 12px; color: #888; margin-bottom: 8px; }
+  .group .head .count { color: #f6c; font-weight: 600; font-size: 14px; }
+  .group .seed { font-size: 10px; color: #555; word-break: break-all; }
+  .members { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 4px; }
+  .cell { aspect-ratio: 1; background: #0b0c10; border-radius: 2px; position: relative; overflow: hidden; }
+  .cell svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .cell .id { position: absolute; bottom: 1px; right: 2px; background: #000c; color: #fff; padding: 0 3px; font-size: 9px; }
+  #status { color: #8a8f99; font-size: 12px; }
+  .empty { color: #666; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG — seed collision scan</h1>
+  <div class="sub">
+    Reads cached unicorns from your local <code>upeg-archive</code> IndexedDB
+    (populated by <a href="/upeg">/upeg</a> as you scroll), groups by seed,
+    surfaces collisions. Two mints with the same seed = identical unicorn —
+    a sign the hook's <code>_randomSeed</code> didn't churn between mints
+    (typically: LP <code>removeLiquidity</code>, which mints via PM → user but
+    doesn't fire <code>afterSwap</code>, so <code>_randomizeSeed</code> never runs).
+    <br>← <a href="/upeg">gallery</a> · <a href="/upeg/grind">grinder</a> · <a href="/upeg/predict">predictor</a> · <a href="/upeg/minted">collection</a>
+  </div>
+</header>
+
+<div class="panel">
+  <div class="stats">
+    <div><span class="k">scanned</span><span class="v" id="scanned">—</span></div>
+    <div><span class="k">unique seeds</span><span class="v" id="unique">—</span></div>
+    <div><span class="k">collision groups</span><span class="v" id="collisions">—</span></div>
+    <div><span class="k">cloned ids</span><span class="v" id="cloned">—</span></div>
+    <div><span class="k">collision rate</span><span class="v" id="rate">—</span></div>
+  </div>
+  <div style="margin-top: 10px;">
+    <button id="rescan">re-read cache</button>
+    <span id="status" style="margin-left: 8px"></span>
+  </div>
+</div>
+
+<div id="groups"></div>
+
+<script>
+"use strict";
+
+const DB_NAME = "upeg-archive";
+const STORE = "unicorns";
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: "id" });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function dbGetAll(db) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, "readonly");
+    const r = tx.objectStore(STORE).getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+const $ = id => document.getElementById(id);
+
+async function scan() {
+  $("status").textContent = "loading cache…";
+  let db, items;
+  try {
+    db = await openDB();
+    items = await dbGetAll(db);
+  } catch (e) {
+    $("status").textContent = "IndexedDB unavailable: " + e.message;
+    return;
+  }
+  if (!items || items.length === 0) {
+    $("status").innerHTML = `cache is empty. open <a href="/upeg">/upeg</a> first and let it scan a few hundred holders, then come back.`;
+    return;
+  }
+
+  const bySeed = new Map();
+  for (const it of items) {
+    if (!it.seed) continue;
+    const key = String(it.seed);
+    if (!bySeed.has(key)) bySeed.set(key, []);
+    bySeed.get(key).push(it);
+  }
+
+  const total = items.length;
+  const unique = bySeed.size;
+  const collisionGroups = [...bySeed.values()].filter(g => g.length > 1);
+  const cloned = collisionGroups.reduce((sum, g) => sum + g.length, 0);
+  const rate = total > 0 ? (cloned / total * 100).toFixed(2) + "%" : "—";
+
+  $("scanned").textContent = total.toLocaleString();
+  $("unique").textContent = unique.toLocaleString();
+  $("collisions").textContent = collisionGroups.length.toLocaleString();
+  $("cloned").textContent = cloned.toLocaleString();
+  $("rate").textContent = rate;
+  $("status").textContent = `scanned ${total.toLocaleString()} cached unicorns`;
+
+  collisionGroups.sort((a, b) => b.length - a.length);
+  const $groups = $("groups");
+  const TOP = 100;
+  $groups.innerHTML = collisionGroups.slice(0, TOP).map(group => {
+    const ids = group.map(g => g.id).sort((a, b) => a - b);
+    const idRange = ids.length > 6
+      ? `${ids[0]}, ${ids[1]}, ${ids[2]}, … (${ids.length-3} more), ${ids.at(-1)}`
+      : ids.join(", ");
+    const allConsecutive = ids.every((id, i) => i === 0 || id === ids[i-1] + 1);
+    const flag = allConsecutive ? `<span style="color:#f6c">CONSECUTIVE</span>` : "";
+    return `
+      <div class="group">
+        <div class="head">
+          <span class="count">${group.length}× clone</span> ${flag}
+          · ids: ${idRange}
+        </div>
+        <div class="members">
+          ${group.slice(0, 12).map(g =>
+            `<div class="cell" title="#${g.id} owner ${g.holder}">${g.svg || ""}<span class="id">#${g.id}</span></div>`
+          ).join("")}
+        </div>
+        <div class="seed">seed: ${group[0].seed}</div>
+      </div>
+    `;
+  }).join("");
+
+  if (collisionGroups.length > TOP) {
+    $groups.insertAdjacentHTML("beforeend",
+      `<div style="text-align:center;color:#666;padding:20px">… and ${collisionGroups.length - TOP} more collision groups (showing top ${TOP})</div>`);
+  }
+  if (collisionGroups.length === 0) {
+    $groups.innerHTML = `<div class="empty">no collisions found in cache. either your scan is small or the bug isn't being exploited (yet).</div>`;
+  }
+}
+
+document.getElementById("rescan").onclick = scan;
+scan();
+</script>
+</body>
+</html>
