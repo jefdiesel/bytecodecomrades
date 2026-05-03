@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>uPEG — clone target sniper</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 24px 80px; background: #0b0c10; color: #e8e8e8;
+         font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+  header { margin: 0 0 16px; }
+  h1 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8f99; font-size: 12px; line-height: 1.6; }
+  .sub a { color: #6cf; text-decoration: none; }
+  .panel { background: #16181d; border-radius: 4px; padding: 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 11px; margin: 0 0 10px; color: #888; font-weight: 600;
+              text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
+  .row label { color: #888; min-width: 130px; }
+  .row .v { color: #fff; word-break: break-all; }
+  input, button { background: #1d2026; color: #e8e8e8; border: 1px solid #2a2e36;
+                  padding: 5px 10px; border-radius: 3px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { background: #262a32; }
+  button.primary { background: #2a3548; border-color: #3d5277; }
+  button.danger { background: #4a2a2a; border-color: #7a4242; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .compare > div { background: #0b0c10; border-radius: 4px; padding: 12px; }
+  .art { width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+         background: #0b0c10; border-radius: 4px; margin-bottom: 8px; }
+  .art svg { width: 100%; height: 100%; image-rendering: pixelated; }
+  .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 3px; font-size: 10px; }
+  .traits .t { background: #16181d; padding: 3px 5px; border-radius: 2px; display: flex; justify-content: space-between; }
+  .traits .t .k { color: #888; }
+  .traits .t .v { color: #fff; }
+  .traits .t.zero { opacity: .35; }
+  .traits .t.match { background: #2a4a2a; }
+  .traits .t.mismatch { background: #4a2a2a; }
+  .verdict { font-size: 18px; padding: 12px; border-radius: 4px; text-align: center; margin: 12px 0; }
+  .verdict.match { background: #2a4a2a; color: #6f6; }
+  .verdict.no-match { background: #1d2026; color: #888; }
+  #log { font-size: 11px; line-height: 1.6; color: #888; max-height: 200px; overflow-y: auto;
+         padding: 8px; background: #0b0c10; border-radius: 3px; margin-top: 10px; }
+  #log .alert { color: #6f6; font-weight: 600; }
+  #log .miss { color: #666; }
+  .stats-row { display: flex; gap: 24px; font-size: 12px; flex-wrap: wrap; }
+  .stats-row .v { color: #fff; font-weight: 600; }
+  .stats-row .k { color: #888; display: block; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>uPEG — clone target sniper</h1>
+  <div class="sub">
+    Read target's seed/traits from chain. Continuously poll the hook's current <code>_randomSeed</code>.
+    On every poll, simulate <code>_nextUpeg(Random(S, 0))</code> and check if the result would match the target.
+    If a match appears, you have ~12s window to fire an LP <code>removeLiquidity</code> via Flashbots
+    before any swap churns the seed.
+    <br><b>Realistic odds: astronomically low</b> for any specific target. This page exists to (a) prove the
+    impossibility (b) catch you if lightning ever strikes.
+    <br>← <a href="/upeg">gallery</a> · <a href="/upeg/predict">predictor</a> · <a href="/upeg/collisions">collisions</a>
+  </div>
+</header>
+
+<div class="panel">
+  <h2>target</h2>
+  <div class="row">
+    <input id="targetId" type="number" placeholder="uPEG # to clone" value="58435" min="1" style="width: 200px">
+    <button id="loadTarget" class="primary">load target</button>
+    <span id="targetStatus" style="color:#888"></span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>compare: target ↔ next mint from current state</h2>
+  <div class="compare">
+    <div>
+      <div style="font-size:11px;color:#888;margin-bottom:6px">TARGET (#<span id="tId">—</span>)</div>
+      <div class="art" id="targetArt"></div>
+      <div class="traits" id="targetTraits"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#888;margin-bottom:6px">NEXT MINT (predicted)</div>
+      <div class="art" id="predArt"></div>
+      <div class="traits" id="predTraits"></div>
+    </div>
+  </div>
+  <div class="verdict" id="verdict">load target + start polling →</div>
+</div>
+
+<div class="panel">
+  <h2>polling</h2>
+  <div class="row" style="display:block">
+    <button id="pollToggle" class="primary">start polling (every 12s)</button>
+    <button id="pollFast">fast poll (every 4s)</button>
+    <button id="pollOnce">poll once</button>
+  </div>
+  <div class="stats-row" style="margin-top: 12px">
+    <div><span class="k">attempts</span><span class="v" id="attempts">0</span></div>
+    <div><span class="k">matches found</span><span class="v" id="matchesCount">0</span></div>
+    <div><span class="k">last poll</span><span class="v" id="lastPoll">—</span></div>
+    <div><span class="k">current hook seed</span><span class="v" id="curSeed" style="font-size:10px;max-width:300px">—</span></div>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+"use strict";
+
+const RPC   = "/api/rpc?chain=eth-mainnet";
+const TOKEN = "0x44b28991b167582f18ba0259e0173176ca125505";
+const HOOK  = "0xe54082DfBf044B6a8F584bdDdb90a22d5613C440";
+
+const SEL = {
+  randomSeed:     "0x0b747d91",
+  generate:       "0x4a7dd523",
+  getImageParams: "0xf68de33d"
+};
+
+let rpcId = 0;
+async function rpc(method, params) {
+  const r = await fetch(RPC, { method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({ jsonrpc:"2.0", id:++rpcId, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+function pad32(h){ return h.replace(/^0x/,"").toLowerCase().padStart(64,"0"); }
+function hexToBytes(h) {
+  h = h.replace(/^0x/, "");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i*2, i*2+2), 16);
+  return out;
+}
+function bytesToHex(b) {
+  return Array.from(b).map(x => x.toString(16).padStart(2,"0")).join("");
+}
+function decodeString(hex) {
+  const data = hex.replace(/^0x/, "");
+  const len = parseInt(data.slice(64, 128), 16);
+  let s = "";
+  for (let i = 0; i < len*2; i += 2) s += String.fromCharCode(parseInt(data.slice(128+i, 130+i), 16));
+  return s;
+}
+
+let _k = null;
+async function keccak() {
+  if (_k) return _k;
+  const noble = await import("https://esm.sh/@noble/hashes@1.5.0/sha3?bundle");
+  _k = noble.keccak_256;
+  return _k;
+}
+
+function decodeTraits(seedStr){
+  const s = BigInt(seedStr);
+  const b = i => Number((s >> BigInt(i*8)) & 0xFFn);
+  return {
+    background: b(0), horn: b(1), accessories: b(2), hair: b(3), wings: b(4), tail: b(5),
+    legsFront: b(6), legsBack: b(7), eyes: b(8), body: b(9), ground: b(10),
+    bodyColor: b(11), eyesColor: b(12), hairColor: b(13),
+    hornColor: b(14), groundColor: b(15), accessoriesColor: b(16), tailColor: b(17),
+  };
+}
+
+function decodeImageParams(hex) {
+  const data = hex.replace(/^0x/, "");
+  const slot = i => parseInt(data.slice(i*64, (i+1)*64).slice(-8), 16);
+  return {
+    colorsCount:           slot(0),
+    backgroundColorsCount: slot(1),
+    accessoriesCount:      slot(2),
+    bodyCount:             slot(3),
+    eyesCount:             slot(4),
+    hairCount:             slot(5),
+    hornCount:             slot(6),
+    legsFrontCount:        slot(7),
+    legsBackCount:         slot(8),
+    tailCount:             slot(9),
+    groundCount:           slot(10),
+    wingsCount:            slot(11),
+  };
+}
+
+async function simulateNextUpeg(randomSeed, p) {
+  const k = await keccak();
+  let nonce = 0n;
+  function next() {
+    nonce += 1n;
+    const buf = new Uint8Array(64);
+    const seedHex  = BigInt(randomSeed).toString(16).padStart(64, "0");
+    const nonceHex = nonce.toString(16).padStart(64, "0");
+    buf.set(hexToBytes(seedHex),  0);
+    buf.set(hexToBytes(nonceHex), 32);
+    return BigInt("0x" + bytesToHex(k(buf)));
+  }
+  const chance    = (prob) => (next() % 100n) < BigInt(prob);
+  const pickId    = (count) => count === 0 ? 0 : Number(next() % BigInt(count)) + 1;
+  const pickColor = (max)   => max === 0 ? 0 : Number(next() % BigInt(max));
+  const t = {
+    background:0, horn:0, accessories:0, hair:0, wings:0, tail:0,
+    legsFront:0, legsBack:0, eyes:0, body:0, ground:0,
+    bodyColor:0, eyesColor:0, hairColor:0, hornColor:0,
+    groundColor:0, accessoriesColor:0, tailColor:0
+  };
+  t.background = p.backgroundColorsCount === 0 ? 0 : Number(next() % BigInt(p.backgroundColorsCount));
+  if (chance(20)) { t.horn = pickId(p.hornCount); if (t.horn) t.hornColor = pickColor(p.colorsCount); }
+  if (chance(30)) { t.accessories = pickId(p.accessoriesCount); if (t.accessories) t.accessoriesColor = pickColor(p.colorsCount); }
+  if (chance(80)) { t.hair = pickId(p.hairCount); if (t.hair) t.hairColor = pickColor(p.colorsCount); }
+  if (chance(30)) { t.wings = pickId(p.wingsCount); }
+  if (chance(80)) { t.tail = pickId(p.tailCount); if (t.tail) t.tailColor = pickColor(p.colorsCount); }
+  t.legsFront = pickId(p.legsFrontCount);
+  t.legsBack  = pickId(p.legsBackCount);
+  t.eyes = pickId(p.eyesCount); if (t.eyes) t.eyesColor = pickColor(p.colorsCount);
+  t.body = pickId(p.bodyCount); if (t.body) t.bodyColor = pickColor(p.colorsCount);
+  t.ground = pickId(p.groundCount); if (t.ground) t.groundColor = pickColor(p.colorsCount);
+  return t;
+}
+
+function packTraits(t) {
+  let s = 0n;
+  const put = (v, sh) => s |= BigInt(v) << BigInt(sh);
+  put(t.background, 0); put(t.horn, 8); put(t.accessories, 16); put(t.hair, 24);
+  put(t.wings, 32); put(t.tail, 40); put(t.legsFront, 48); put(t.legsBack, 56);
+  put(t.eyes, 64); put(t.body, 72); put(t.ground, 80);
+  put(t.bodyColor, 88); put(t.eyesColor, 96); put(t.hairColor, 104);
+  put(t.hornColor, 112); put(t.groundColor, 120);
+  put(t.accessoriesColor, 128); put(t.tailColor, 136);
+  return s.toString();
+}
+
+async function fetchSvg(seed) {
+  try { return decodeString(await rpc("eth_call", [{ to: HOOK, data: SEL.generate + pad32(BigInt(seed).toString(16)) }, "latest"])); }
+  catch { return ""; }
+}
+
+// Read _upegs[id] from token storage. Slot = keccak256(id || 0).
+async function readTargetSeed(id) {
+  const k = await keccak();
+  const idHex = BigInt(id).toString(16).padStart(64, "0");
+  const concat = idHex + "0".repeat(64);
+  const concatBytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) concatBytes[i] = parseInt(concat.slice(i*2, i*2+2), 16);
+  const slot = "0x" + bytesToHex(k(concatBytes));
+  const v = await rpc("eth_getStorageAt", [TOKEN, slot, "latest"]);
+  if (!v || BigInt(v) === 0n) return null;
+  return BigInt(v).toString();
+}
+
+const $ = id => document.getElementById(id);
+
+function fieldList(t) {
+  return [
+    ["background", t.background], ["body", t.body], ["body_color", t.bodyColor],
+    ["eyes", t.eyes], ["eyes_color", t.eyesColor],
+    ["legs_front", t.legsFront], ["legs_back", t.legsBack],
+    ["horn", t.horn], ["horn_color", t.hornColor],
+    ["accessories", t.accessories], ["accessories_color", t.accessoriesColor],
+    ["hair", t.hair], ["hair_color", t.hairColor],
+    ["wings", t.wings],
+    ["tail", t.tail], ["tail_color", t.tailColor],
+    ["ground", t.ground], ["ground_color", t.groundColor],
+  ];
+}
+
+function renderTraits(t, container, vsTarget=null) {
+  const tFields = fieldList(t);
+  const targetFields = vsTarget ? fieldList(vsTarget) : null;
+  container.innerHTML = tFields.map(([k, v], i) => {
+    let cls = v === 0 ? 'zero' : '';
+    if (targetFields) {
+      const targetV = targetFields[i][1];
+      cls = (v === targetV) ? 'match' : 'mismatch';
+    }
+    return `<div class="t ${cls}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  }).join("");
+}
+
+let target = null;     // { id, seed, traits, svg }
+let params = null;
+let attempts = 0;
+let matches = 0;
+
+async function loadTarget() {
+  const id = parseInt($("targetId").value, 10);
+  if (!Number.isInteger(id) || id < 1) { $("targetStatus").textContent = "invalid id"; return; }
+  $("targetStatus").textContent = "loading...";
+  const seed = await readTargetSeed(id);
+  if (!seed) { $("targetStatus").textContent = "id not found / burned"; return; }
+  const traits = decodeTraits(seed);
+  const svg = await fetchSvg(seed);
+  target = { id, seed, traits, svg };
+  $("tId").textContent = id;
+  $("targetArt").innerHTML = svg;
+  renderTraits(traits, $("targetTraits"));
+  $("targetStatus").innerHTML = `loaded · seed <code style="font-size:9px">${seed}</code>`;
+  if (!params) params = decodeImageParams(await rpc("eth_call", [{ to: HOOK, data: SEL.getImageParams }, "latest"]));
+}
+
+function traitsEqual(a, b) {
+  return JSON.stringify(fieldList(a)) === JSON.stringify(fieldList(b));
+}
+
+function log(msg, klass) {
+  const t = new Date().toTimeString().slice(0,8);
+  $("log").insertAdjacentHTML("afterbegin", `<div class="${klass||''}">[${t}] ${msg}</div>`);
+}
+
+async function pollOnce() {
+  if (!target) { log("load a target first", "miss"); return; }
+  attempts++;
+  $("attempts").textContent = attempts;
+  $("lastPoll").textContent = new Date().toLocaleTimeString();
+  try {
+    const seedHex = await rpc("eth_call", [{ to: HOOK, data: SEL.randomSeed }, "latest"]);
+    const curSeed = BigInt(seedHex).toString();
+    $("curSeed").textContent = curSeed.slice(0, 30) + "…" + curSeed.slice(-10);
+
+    // Compute the next _randomSeed (post-_randomizeSeed) for the next mint
+    const blk = await rpc("eth_getBlockByNumber", ["latest", false]);
+    const bn = parseInt(blk.number, 16);
+    const ts = parseInt(blk.timestamp, 16);
+    const pr = blk.mixHash || blk.prevRandao || "0x0";
+    // For the LP-withdraw bug, the seed used = current (no _randomizeSeed call).
+    // So we simulate _nextUpeg directly with curSeed (no churn).
+    const predTraits = await simulateNextUpeg(curSeed, params);
+    const predSeed = packTraits(predTraits);
+    const predSvg = await fetchSvg(predSeed);
+    $("predArt").innerHTML = predSvg;
+    renderTraits(predTraits, $("predTraits"), target.traits);
+
+    const isMatch = traitsEqual(predTraits, target.traits);
+    if (isMatch) {
+      matches++;
+      $("matchesCount").textContent = matches;
+      $("verdict").className = "verdict match";
+      $("verdict").innerHTML = `🎯 MATCH! Fire LP removeLiquidity NOW (within ~12s before next swap).`;
+      log(`MATCH at attempt ${attempts}!`, "alert");
+      // Annoying browser beep
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator(); osc.frequency.value = 880; osc.connect(ctx.destination); osc.start(); setTimeout(() => osc.stop(), 200);
+      } catch {}
+    } else {
+      $("verdict").className = "verdict no-match";
+      $("verdict").innerHTML = `no match (attempt ${attempts}). Predicted unicorn differs from target.`;
+      log(`miss #${attempts}`, "miss");
+    }
+  } catch (e) {
+    log("poll error: " + e.message, "miss");
+  }
+}
+
+let pollInterval = null;
+function startPolling(ms) {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollOnce, ms);
+  pollOnce();
+  $("pollToggle").textContent = "stop polling";
+  log(`polling every ${ms/1000}s`, "alert");
+}
+function stopPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = null;
+  $("pollToggle").textContent = "start polling (every 12s)";
+  log("stopped", "miss");
+}
+
+$("loadTarget").onclick = loadTarget;
+$("pollOnce").onclick = pollOnce;
+$("pollToggle").onclick = () => pollInterval ? stopPolling() : startPolling(12000);
+$("pollFast").onclick = () => startPolling(4000);
+
+loadTarget();
+</script>
+</body>
+</html>
