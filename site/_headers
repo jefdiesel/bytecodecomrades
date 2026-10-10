@@ -1,0 +1,16 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/test
+  Cache-Control: no-store, max-age=0, must-revalidate
+
+/test/*
+  Cache-Control: no-store, max-age=0, must-revalidate
+
+/upeg
+  Cache-Control: no-store, max-age=0, must-revalidate
+
+/upeg/*
+  Cache-Control: no-store, max-age=0, must-revalidate
